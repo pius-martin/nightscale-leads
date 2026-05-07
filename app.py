@@ -421,6 +421,50 @@ def _compose_body(template_body: str, template_footer: str, signature: str, cont
     return "".join(parts)
 
 
+# Email shell:
+# - meta name="color-scheme" + supported-color-schemes: declare we're aware
+#   of dark mode so clients don't apply their own (broken) auto-inversion
+# - x-apple-disable-message-reformatting: stops Apple Mail's heuristic
+#   reformatting that produced the dark "highlight" boxes around bolded
+#   words and detected entities (company names etc.)
+# - format-detection: disables iOS data detectors that auto-link/style
+#   phone numbers, addresses, dates, etc.
+# Inline CSS only — most email clients strip <style> in <head>, so colors
+# are forced explicitly on body and links to keep contrast in both modes.
+EMAIL_HTML_TEMPLATE = """<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<meta name="color-scheme" content="only light">
+<meta name="supported-color-schemes" content="only light">
+<meta name="x-apple-disable-message-reformatting">
+<meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">
+<title>Nightscale</title>
+<style>
+  /* Force light theme on every element so Apple Mail / Outlook don't auto-invert */
+  :root {{ color-scheme: only light; supported-color-schemes: only light; }}
+  body, body * {{ background-color:transparent !important; }}
+  body {{ margin:0; padding:0; background-color:#ffffff !important; color:#1a1a1a !important; }}
+  .wrap {{ max-width:640px; margin:0 auto; padding:24px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; color:#1a1a1a !important; background-color:#ffffff !important; line-height:1.55; font-size:15px; }}
+  .wrap p {{ margin:0 0 1em; color:#1a1a1a !important; }}
+  .wrap a {{ color:#0a66c2 !important; text-decoration:underline; }}
+  .wrap strong, .wrap b {{ font-weight:600; color:#1a1a1a !important; background-color:transparent !important; }}
+  .wrap em, .wrap i {{ color:#1a1a1a !important; }}
+  .wrap ul, .wrap ol {{ margin:0 0 1em; padding-left:24px; color:#1a1a1a !important; }}
+  .wrap blockquote {{ margin:0 0 1em; padding:8px 14px; border-left:3px solid #d0d0d0; color:#444 !important; }}
+</style>
+</head>
+<body>
+<div class="wrap" style="color:#1a1a1a;background-color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;line-height:1.55;font-size:15px;max-width:640px;margin:0 auto;padding:24px;">{content}</div>
+</body>
+</html>"""
+
+
+def _wrap_email_html(inner_html: str) -> str:
+    return EMAIL_HTML_TEMPLATE.format(content=inner_html or "")
+
+
 # ---------- Send ----------
 def _contact_variant(c: dict) -> str:
     has_name = bool((c.get("first_name") or "").strip() or (c.get("last_name") or "").strip())
@@ -508,7 +552,8 @@ def send_run():
             db.log_send(c["id"], c["email"], art, "", "failed", f"no template for variant {variant}")
             continue
         subject = render_template_text(template["subject"], c)
-        body_html = _compose_body(template["body"], template.get("footer", ""), signature, c)
+        inner = _compose_body(template["body"], template.get("footer", ""), signature, c)
+        body_html = _wrap_email_html(inner)
         try:
             graph_mail.send_mail(
                 c["email"],

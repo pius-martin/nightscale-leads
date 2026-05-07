@@ -55,13 +55,68 @@
 <div class="card mt">
     <div class="card-header">
         <h2>Import from CSV / Excel</h2>
+        <a class="btn btn-ghost btn-sm" href="{{ url_for('static', filename='contacts-sample.csv') }}" download>Download sample CSV</a>
     </div>
-    <p class="muted" style="margin:0 0 14px">
-        Required columns: <code class="mono">email</code> and <code class="mono">type</code>, plus at least one of
-        <code class="mono">company</code>, <code class="mono">first_name</code>, <code class="mono">last_name</code>.
-        Optional: <code class="mono">notes</code>. German aliases (firma, vorname, nachname, art, notizen) also work.
-        Unknown types are auto-created.
+
+    <p class="muted" style="margin:0 0 16px">
+        First row must be the header. Column order does not matter. Unknown types are auto-created.
     </p>
+
+    <table class="table" style="margin-bottom:18px">
+        <thead>
+            <tr>
+                <th>Column</th>
+                <th>Required?</th>
+                <th>Aliases (also accepted)</th>
+                <th>Example</th>
+            </tr>
+        </thead>
+        <tbody>
+            <tr>
+                <td class="mono">email</td>
+                <td><span class="badge ok">required</span></td>
+                <td class="mono muted">e-mail, mail, e_mail</td>
+                <td class="mono">jane@acme.com</td>
+            </tr>
+            <tr>
+                <td class="mono">type</td>
+                <td><span class="badge ok">required</span></td>
+                <td class="mono muted">art, typ, kategorie, category, tag</td>
+                <td class="mono">Investor</td>
+            </tr>
+            <tr>
+                <td class="mono">company</td>
+                <td><span class="badge dim">at least one of company / first_name / last_name</span></td>
+                <td class="mono muted">firma, organization, organisation</td>
+                <td class="mono">Acme GmbH</td>
+            </tr>
+            <tr>
+                <td class="mono">first_name</td>
+                <td><span class="badge dim">…</span></td>
+                <td class="mono muted">firstname, first, vorname</td>
+                <td class="mono">Jane</td>
+            </tr>
+            <tr>
+                <td class="mono">last_name</td>
+                <td><span class="badge dim">…</span></td>
+                <td class="mono muted">lastname, last, nachname, surname</td>
+                <td class="mono">Doe</td>
+            </tr>
+            <tr>
+                <td class="mono">notes</td>
+                <td><span class="badge dim">optional</span></td>
+                <td class="mono muted">notizen, note, kommentar, comment</td>
+                <td>Met at conference</td>
+            </tr>
+        </tbody>
+    </table>
+
+    <p class="muted" style="margin:0 0 14px; font-size:12.5px">
+        Examples for the body rows: <code class="mono">Acme GmbH,Jane,Doe,jane@acme.com,Investor,Met at conference</code> ·
+        <code class="mono">Beta Holdings,,,info@beta.com,Investor,</code> (company-only).
+        Excel (.xlsx) and CSV (semicolon, comma, or tab) are all supported.
+    </p>
+
     <form action="{{ url_for('contacts_import') }}" method="post" enctype="multipart/form-data" class="form">
         <div class="row" style="gap:10px; align-items:center">
             <input type="file" name="file" accept=".csv,.xlsx,.xlsm" required style="color:var(--text); padding:8px 0">
