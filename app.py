@@ -770,9 +770,11 @@ def auth_start():
 
 @app.route("/auth/status")
 def auth_status():
+    accs = graph_mail.list_accounts()
     return jsonify({
-        "signed_in": graph_mail.is_signed_in(),
-        "account": graph_mail.signed_in_account(),
+        "signed_in": bool(accs),
+        "account": accs[0]["username"] if accs else None,
+        "accounts": [a["username"] for a in accs],
     })
 
 
