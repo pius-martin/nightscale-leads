@@ -4,7 +4,16 @@ from contextlib import contextmanager
 import psycopg2
 import psycopg2.extras
 
-DATABASE_URL = os.environ.get("DATABASE_URL")
+
+def _database_url() -> str:
+    url = os.environ.get("DATABASE_URL")
+    if not url:
+        raise RuntimeError(
+            "DATABASE_URL is not set. On Railway, link the Postgres service "
+            "via Variables → Add Reference → ${{Postgres.DATABASE_URL}}."
+        )
+    return url
+
 
 SCHEMA = """
 CREATE TABLE IF NOT EXISTS contacts (
@@ -23,6 +32,11 @@ CREATE TABLE IF NOT EXISTS templates (
     subject TEXT NOT NULL,
     body TEXT NOT NULL,
     updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS arten (
+    name TEXT PRIMARY KEY,
+    created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
 CREATE TABLE IF NOT EXISTS settings (
@@ -45,9 +59,7 @@ CREATE TABLE IF NOT EXISTS sent_log (
 
 @contextmanager
 def get_conn():
-    if not DATABASE_URL:
-        raise RuntimeError("DATABASE_URL not set")
-    conn = psycopg2.connect(DATABASE_URL)
+    conn = psycopg2.connect(_database_url())
     try:
         yield conn
         conn.commit()
@@ -65,6 +77,52 @@ def _dict_cursor(conn):
 def init_db():
     with get_conn() as c, c.cursor() as cur:
         cur.execute(SCHEMA)
+        # Backfill arten from existing data
+        cur.execute(
+            """
+            INSERT INTO arten (name)
+            SELECT DISTINCT art FROM contacts
+            WHERE art IS NOT NULL AND art <> ''
+            ON CONFLICT DO NOTHING
+            """
+        )
+        cur.execute(
+            """
+            INSERT INTO arten (name)
+            SELECT DISTINCT art FROM templates
+            WHERE art IS NOT NULL AND art <> ''
+            ON CONFLICT DO NOTHING
+            """
+        )
+
+
+# Arten (master list)
+def list_arten():
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT name FROM arten ORDER BY LOWER(name)")
+        return [r[0] for r in cur.fetchall()]
+
+
+def add_art(name: str):
+    name = name.strip()
+    if not name:
+        return
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "INSERT INTO arten (name) VALUES (%s) ON CONFLICT DO NOTHING",
+            (name,),
+        )
+
+
+def delete_art(name: str):
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM arten WHERE name=%s", (name,))
+
+
+def art_usage_count(name: str) -> int:
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT COUNT(*) FROM contacts WHERE art=%s", (name,))
+        return cur.fetchone()[0]
 
 
 # Contacts
@@ -110,23 +168,6 @@ def get_contact(cid):
         return dict(row) if row else None
 
 
-def list_arten():
-    with get_conn() as c, c.cursor() as cur:
-        cur.execute(
-            """
-            SELECT art FROM (
-                SELECT art FROM contacts
-                UNION
-                SELECT art FROM templates
-            ) AS u
-            WHERE art IS NOT NULL AND art <> ''
-            GROUP BY art
-            ORDER BY LOWER(art)
-            """
-        )
-        return [r[0] for r in cur.fetchall()]
-
-
 # Templates
 def list_templates():
     with get_conn() as c:
@@ -163,7 +204,7 @@ def delete_template(tid):
         cur.execute("DELETE FROM templates WHERE id=%s", (tid,))
 
 
-# Settings (key/value)
+# Settings
 def get_setting(key: str, default: str = "") -> str:
     with get_conn() as c, c.cursor() as cur:
         cur.execute("SELECT value FROM settings WHERE key=%s", (key,))

@@ -1,31 +1,39 @@
 {% extends "base.html" %}
-{% block title %}Kontakt bearbeiten{% endblock %}
+{% block title %}Edit contact{% endblock %}
+{% block container_class %} narrow{% endblock %}
 {% block content %}
-<section class="card max-narrow">
-    <h2>Kontakt bearbeiten</h2>
+
+<div class="page-header">
+    <h1>Edit contact</h1>
+</div>
+
+<div class="card">
     <form method="post" class="form">
-        <label>Firma
+        <label>Company
             <input type="text" name="firma" value="{{ contact.firma }}" required>
         </label>
         <label>Name
             <input type="text" name="name" value="{{ contact.name }}" required>
         </label>
-        <label>E-Mail
+        <label>Email
             <input type="email" name="email" value="{{ contact.email }}" required>
         </label>
-        <label>Art
-            <input type="text" name="art" list="arten-list" value="{{ contact.art }}" required>
-            <datalist id="arten-list">
-                {% for a in arten %}<option value="{{ a }}">{% endfor %}
-            </datalist>
+        <label>Type
+            <select name="art" required>
+                {% for a in arten %}<option value="{{ a }}" {% if a == contact.art %}selected{% endif %}>{{ a }}</option>{% endfor %}
+                {% if contact.art and contact.art not in arten %}
+                    <option value="{{ contact.art }}" selected>{{ contact.art }} (legacy)</option>
+                {% endif %}
+            </select>
         </label>
-        <label>Notizen
+        <label>Notes
             <textarea name="notes" rows="3">{{ contact.notes }}</textarea>
         </label>
         <div class="row">
-            <button class="btn btn-primary" type="submit">Speichern</button>
-            <a class="btn btn-ghost" href="{{ url_for('contacts') }}">Abbrechen</a>
+            <button class="btn btn-primary" type="submit">Save</button>
+            <a class="btn btn-ghost" href="{{ url_for('contacts') }}">Cancel</a>
         </div>
     </form>
-</section>
+</div>
+
 {% endblock %}

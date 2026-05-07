@@ -10,22 +10,24 @@ SCOPES = ["Mail.Send"]
 TOKEN_CACHE_KEY = "msal_token_cache"
 
 _lock = threading.Lock()
-_pending_flow = None
-_app_cache = None  # (app, cache, client_id, tenant_id)
+_pending_flow = None  # (app, cache, flow)
 
 
-def _load_cache():
+def _load_cache_from_db() -> msal.SerializableTokenCache:
     cache = msal.SerializableTokenCache()
     try:
         serialized = _db.get_setting(TOKEN_CACHE_KEY, "")
     except Exception:
         serialized = ""
     if serialized:
-        cache.deserialize(serialized)
+        try:
+            cache.deserialize(serialized)
+        except Exception:
+            pass
     return cache
 
 
-def _save_cache(cache):
+def _save_cache(cache: msal.SerializableTokenCache):
     if cache.has_state_changed:
         try:
             _db.set_setting(TOKEN_CACHE_KEY, cache.serialize())
@@ -34,20 +36,17 @@ def _save_cache(cache):
 
 
 def _build_app():
-    global _app_cache
+    """Build a fresh MSAL app + cache loaded from DB. Cheap enough per request."""
     client_id = os.environ.get("AZURE_CLIENT_ID")
     tenant_id = os.environ.get("AZURE_TENANT_ID")
     if not client_id or not tenant_id:
-        raise RuntimeError("AZURE_CLIENT_ID and AZURE_TENANT_ID must be set in .env")
-    if _app_cache and _app_cache[2] == client_id and _app_cache[3] == tenant_id:
-        return _app_cache[0], _app_cache[1]
-    cache = _load_cache()
+        raise RuntimeError("AZURE_CLIENT_ID and AZURE_TENANT_ID must be set")
+    cache = _load_cache_from_db()
     app = msal.PublicClientApplication(
         client_id,
         authority=f"https://login.microsoftonline.com/{tenant_id}",
         token_cache=cache,
     )
-    _app_cache = (app, cache, client_id, tenant_id)
     return app, cache
 
 
@@ -67,11 +66,11 @@ def start_device_flow():
     """Initiate device code flow. Returns dict with user_code, verification_uri, message."""
     global _pending_flow
     with _lock:
-        app, _ = _build_app()
+        app, cache = _build_app()
         flow = app.initiate_device_flow(scopes=SCOPES)
         if "user_code" not in flow:
             raise RuntimeError(f"Failed to start device flow: {flow}")
-        _pending_flow = (app, flow)
+        _pending_flow = (app, cache, flow)
         return {
             "user_code": flow["user_code"],
             "verification_uri": flow["verification_uri"],
@@ -86,8 +85,7 @@ def complete_device_flow():
     with _lock:
         if _pending_flow is None:
             return False
-        app, flow = _pending_flow
-    _, cache = _build_app()
+        app, cache, flow = _pending_flow
     result = app.acquire_token_by_device_flow(flow)
     _save_cache(cache)
     with _lock:
@@ -112,7 +110,6 @@ def signed_in_account():
 
 
 def sign_out():
-    global _app_cache
     try:
         app, cache = _build_app()
         for acc in app.get_accounts():
@@ -124,7 +121,6 @@ def sign_out():
         _db.delete_setting(TOKEN_CACHE_KEY)
     except Exception:
         pass
-    _app_cache = None
 
 
 def send_mail(

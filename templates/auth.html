@@ -1,30 +1,44 @@
 {% extends "base.html" %}
-{% block title %}Microsoft verbinden{% endblock %}
+{% block title %}Connect Microsoft · Nightscale{% endblock %}
+{% block container_class %} narrow{% endblock %}
 {% block content %}
 
-<section class="card max-narrow">
-    <h2>Microsoft 365 verbinden</h2>
+<div class="page-header">
+    <h1>Connect Microsoft 365</h1>
+</div>
+
+<div class="card">
     {% if signed_in %}
-        <p>Angemeldet als <strong>{{ account }}</strong>.</p>
+        <p style="margin:0 0 14px">Connected as <strong>{{ account }}</strong>.</p>
         <form action="{{ url_for('auth_signout') }}" method="post">
-            <button class="btn btn-danger" type="submit">Abmelden</button>
+            <button class="btn btn-danger" type="submit">Sign out</button>
         </form>
     {% else %}
-        <p class="muted">Login per Device-Code-Flow. Klick auf „Login starten", öffne den Link, gib den Code ein und melde dich mit deinem Microsoft-Konto an. Der Token wird lokal gespeichert.</p>
-        <button id="start-btn" class="btn btn-primary">Login starten</button>
+        <p class="muted" style="margin:0 0 18px">
+            Sign in with your Microsoft account using the device-code flow. Click "Start sign-in",
+            open the link, enter the code, and approve. The token is stored encrypted in the database.
+        </p>
+        <button id="start-btn" class="btn btn-primary">Start sign-in</button>
 
         <div id="flow-info" class="flow-info" hidden>
-            <div class="kv"><span class="muted">URL</span>
+            <div>
+                <h3 style="margin:0 0 6px">1. Open this URL</h3>
                 <a id="flow-url" href="#" target="_blank" rel="noopener" class="mono">—</a>
             </div>
-            <div class="kv"><span class="muted">Code</span>
-                <code id="flow-code" class="code-big">—</code>
-                <button id="copy-btn" class="btn btn-ghost btn-sm">Kopieren</button>
+            <div>
+                <h3 style="margin:0 0 6px">2. Enter this code</h3>
+                <div class="row">
+                    <code id="flow-code" class="code-big">—</code>
+                    <button id="copy-btn" type="button" class="btn btn-ghost btn-sm">Copy</button>
+                </div>
             </div>
-            <p id="flow-status" class="muted">Warte auf Login…</p>
+            <div>
+                <h3 style="margin:0 0 6px">3. Sign in</h3>
+                <p id="flow-status" class="muted" style="margin:0">Waiting for sign-in…</p>
+            </div>
         </div>
     {% endif %}
-</section>
+</div>
 
 {% endblock %}
 {% block scripts %}
@@ -33,16 +47,17 @@ const startBtn = document.getElementById('start-btn');
 if (startBtn) {
     startBtn.addEventListener('click', async () => {
         startBtn.disabled = true;
-        startBtn.textContent = 'Starte…';
+        startBtn.textContent = 'Starting…';
         const r = await fetch('{{ url_for("auth_start") }}', {method: 'POST'});
         if (!r.ok) {
             startBtn.disabled = false;
-            startBtn.textContent = 'Login starten';
-            alert('Fehler beim Starten.');
+            startBtn.textContent = 'Start sign-in';
+            alert('Failed to start sign-in.');
             return;
         }
         const data = await r.json();
         document.getElementById('flow-info').hidden = false;
+        startBtn.hidden = true;
         const urlEl = document.getElementById('flow-url');
         urlEl.href = data.verification_uri;
         urlEl.textContent = data.verification_uri;
@@ -58,7 +73,7 @@ if (startBtn) {
             const s = await fetch('{{ url_for("auth_status") }}').then(r => r.json());
             if (s.signed_in) {
                 clearInterval(poll);
-                status.textContent = 'Verbunden mit ' + s.account;
+                status.textContent = 'Connected as ' + s.account + '. Redirecting…';
                 setTimeout(() => location.href = '{{ url_for("send_view") }}', 800);
             }
         }, 2500);

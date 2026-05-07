@@ -1,41 +1,53 @@
 {% extends "base.html" %}
-{% block title %}Templates · Nightscale Leads{% endblock %}
+{% block title %}Templates · Nightscale{% endblock %}
 {% block head %}
 <link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
 {% endblock %}
 {% block content %}
 
-<section class="grid sidebar">
+<div class="page-header">
+    <div>
+        <h1>Templates</h1>
+        <div class="subtitle">One email template per type. Use placeholders to personalize.</div>
+    </div>
+</div>
+
+{% if not arten %}
+    <div class="card">
+        <div class="empty">
+            <p>You need to create a type before writing a template.</p>
+            <a class="btn btn-primary" href="{{ url_for('types_view') }}">Manage types</a>
+        </div>
+    </div>
+{% else %}
+<div class="split">
     <aside class="card">
-        <h2>Arten</h2>
-        {% if arten %}
+        <h3 style="margin:0 0 12px">Types</h3>
         <ul class="sidebar-list">
             {% for a in arten %}
             <li>
-                <a href="{{ url_for('templates_view', art=a) }}" class="{% if a == selected %}active{% endif %}">
-                    {{ a }}
-                </a>
+                <a href="{{ url_for('templates_view', art=a) }}" class="{% if a == selected %}active{% endif %}">{{ a }}</a>
             </li>
             {% endfor %}
         </ul>
-        {% else %}
-        <p class="muted">Noch keine Arten. Lege erst einen Kontakt an.</p>
-        {% endif %}
     </aside>
 
     <div class="card">
-        <h2>Template{% if selected %} · <span class="tag">{{ selected }}</span>{% endif %}</h2>
+        <div class="card-header">
+            <h2>{% if current %}Editing{% else %}New template for{% endif %} <span class="tag">{{ selected }}</span></h2>
+            {% if current %}
+            <form action="{{ url_for('delete_template', tid=current.id) }}" method="post" onsubmit="return confirm('Delete this template?')" style="display:inline">
+                <button class="btn btn-danger btn-sm" type="submit">Delete template</button>
+            </form>
+            {% endif %}
+        </div>
         <form method="post" class="form" id="tpl-form">
-            <label>Art
-                <input type="text" name="art" value="{{ selected }}" placeholder="z.B. Investor" required>
+            <input type="hidden" name="art" value="{{ selected }}">
+            <label>Subject
+                <input type="text" name="subject" value="{{ current.subject if current else '' }}" placeholder="Hi {{ '{{name}}' }}, quick note on {{ '{{firma}}' }}" required>
             </label>
-            <label>Betreff
-                <input type="text" name="subject" value="{{ current.subject if current else '' }}" placeholder="Hi {{ '{{name}}' }}, kurz zu {{ '{{firma}}' }}" required>
-            </label>
-            <label>Inhalt
-                <span class="muted" style="text-transform:none;letter-spacing:normal;font-weight:normal">
-                    Platzhalter: {{ '{{firma}}' }} {{ '{{name}}' }} {{ '{{email}}' }} {{ '{{art}}' }}
-                </span>
+            <label>Body
+                <span class="hint">Placeholders: {{ '{{firma}}' }} {{ '{{name}}' }} {{ '{{email}}' }} {{ '{{art}}' }}</span>
             </label>
             <div id="editor-toolbar">
                 <span class="ql-formats">
@@ -62,21 +74,17 @@
             <div id="editor"></div>
             <textarea name="body" id="body-input" hidden>{{ current.body if current else '' }}</textarea>
 
-            <div class="row mt">
-                <button type="submit" class="btn btn-primary">Speichern</button>
-                {% if current %}
-                <button type="button" class="btn btn-ghost" onclick="document.getElementById('del-form').submit()">Löschen</button>
-                {% endif %}
+            <div class="row">
+                <button type="submit" class="btn btn-primary">Save template</button>
             </div>
         </form>
-        {% if current %}
-        <form id="del-form" action="{{ url_for('delete_template', tid=current.id) }}" method="post" onsubmit="return confirm('Template löschen?')" style="display:none"></form>
-        {% endif %}
     </div>
-</section>
+</div>
+{% endif %}
 
 {% endblock %}
 {% block scripts %}
+{% if arten %}
 <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
 <script>
 const initial = {{ (current.body if current else '') | tojson }};
@@ -93,4 +101,5 @@ document.getElementById('tpl-form').addEventListener('submit', () => {
     document.getElementById('body-input').value = quill.root.innerHTML;
 });
 </script>
+{% endif %}
 {% endblock %}

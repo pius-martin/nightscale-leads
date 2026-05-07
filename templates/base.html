@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="de">
+<html lang="en">
 <head>
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
@@ -11,30 +11,28 @@
     <header class="topbar">
         <div class="brand">
             <span class="dot"></span>
-            <span>nightscale · leads</span>
+            <span>nightscale</span>
         </div>
         <nav class="nav">
-            <a href="{{ url_for('contacts') }}" class="{% if request.endpoint == 'contacts' or request.endpoint == 'edit_contact' %}active{% endif %}">Kontakte</a>
+            <a href="{{ url_for('contacts') }}" class="{% if request.endpoint in ['contacts','edit_contact'] %}active{% endif %}">Contacts</a>
+            <a href="{{ url_for('types_view') }}" class="{% if request.endpoint == 'types_view' %}active{% endif %}">Types</a>
             <a href="{{ url_for('templates_view') }}" class="{% if request.endpoint == 'templates_view' %}active{% endif %}">Templates</a>
-            <a href="{{ url_for('send_view') }}" class="{% if request.endpoint == 'send_view' %}active{% endif %}">Versand</a>
-            <a href="{{ url_for('settings_view') }}" class="{% if request.endpoint == 'settings_view' %}active{% endif %}">Einstellungen</a>
+            <a href="{{ url_for('send_view') }}" class="{% if request.endpoint == 'send_view' %}active{% endif %}">Send</a>
+            <a href="{{ url_for('settings_view') }}" class="{% if request.endpoint == 'settings_view' %}active{% endif %}">Settings</a>
         </nav>
         <div class="auth-status">
             {% if signed_in %}
                 <span class="badge ok">● {{ account }}</span>
-                <form action="{{ url_for('auth_signout') }}" method="post" style="display:inline">
-                    <button class="btn btn-ghost btn-sm" type="submit">Abmelden</button>
-                </form>
             {% else %}
-                <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">Microsoft verbinden</a>
+                <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">Connect Microsoft</a>
             {% endif %}
             <form action="{{ url_for('logout') }}" method="post" style="display:inline">
-                <button class="btn btn-ghost btn-sm" type="submit" title="Abmelden">⏻</button>
+                <button class="btn btn-ghost btn-icon" type="submit" title="Sign out">⏻</button>
             </form>
         </div>
     </header>
 
-    <main class="container">
+    <main class="container{% block container_class %}{% endblock %}">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
                 {% for cat, msg in messages %}

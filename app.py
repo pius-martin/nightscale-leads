@@ -16,7 +16,24 @@ app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 
-db.init_db()
+_db_ready = {"ok": False, "error": None}
+_db_lock = threading.Lock()
+
+
+def _ensure_db():
+    if _db_ready["ok"]:
+        return None
+    with _db_lock:
+        if _db_ready["ok"]:
+            return None
+        try:
+            db.init_db()
+            _db_ready["ok"] = True
+            _db_ready["error"] = None
+        except Exception as e:
+            _db_ready["error"] = str(e)
+            return _db_ready["error"]
+    return None
 
 
 def login_required(f):
@@ -32,14 +49,40 @@ def login_required(f):
 
 @app.before_request
 def gate():
-    if not APP_PASSWORD:
+    # Allow static files and login page through without auth
+    if request.endpoint in {"login", "static", "health"}:
         return None
-    public = {"login", "static"}
-    if request.endpoint in public:
-        return None
-    if not session.get("authed"):
+    # Try to ensure DB is ready
+    err = _ensure_db()
+    if err:
+        return render_template("db_error.html", error=err), 503
+    if APP_PASSWORD and not session.get("authed"):
         return redirect(url_for("login", next=request.path))
     return None
+
+
+@app.context_processor
+def inject_globals():
+    try:
+        signed_in = graph_mail.is_signed_in()
+        account = graph_mail.signed_in_account()
+        settings = db.all_settings() if _db_ready["ok"] else {}
+    except Exception:
+        signed_in, account, settings = False, None, {}
+    return {"signed_in": signed_in, "account": account, "settings": settings}
+
+
+def render_template_text(text: str, contact: dict) -> str:
+    """Replace {{firma}}, {{name}}, {{email}}, {{art}} placeholders."""
+    def repl(m):
+        key = m.group(1).strip().lower()
+        return str(contact.get(key, "") or "")
+    return re.sub(r"\{\{\s*(\w+)\s*\}\}", repl, text or "")
+
+
+@app.route("/health")
+def health():
+    return {"ok": True}
 
 
 @app.route("/login", methods=["GET", "POST"])
@@ -53,7 +96,7 @@ def login():
             session["authed"] = True
             nxt = request.args.get("next") or url_for("contacts")
             return redirect(nxt)
-        error = "Falsches Passwort."
+        error = "Wrong password."
     return render_template("login.html", error=error)
 
 
@@ -61,23 +104,6 @@ def login():
 def logout():
     session.clear()
     return redirect(url_for("login"))
-
-
-def render_template_text(text: str, contact: dict) -> str:
-    """Replace {{firma}}, {{name}}, {{email}}, {{art}} placeholders."""
-    def repl(m):
-        key = m.group(1).strip().lower()
-        return str(contact.get(key, "") or "")
-    return re.sub(r"\{\{\s*(\w+)\s*\}\}", repl, text or "")
-
-
-@app.context_processor
-def inject_globals():
-    return {
-        "signed_in": graph_mail.is_signed_in(),
-        "account": graph_mail.signed_in_account(),
-        "settings": db.all_settings(),
-    }
 
 
 @app.route("/")
@@ -88,17 +114,20 @@ def index():
 # ---------- Contacts ----------
 @app.route("/contacts", methods=["GET", "POST"])
 def contacts():
+    arten = db.list_arten()
     if request.method == "POST":
+        art = request.form.get("art", "").strip()
+        if art and art not in arten:
+            db.add_art(art)
         db.add_contact(
             firma=request.form.get("firma", ""),
             name=request.form.get("name", ""),
             email=request.form.get("email", ""),
-            art=request.form.get("art", ""),
+            art=art,
             notes=request.form.get("notes", ""),
         )
         return redirect(url_for("contacts"))
     items = db.list_contacts()
-    arten = db.list_arten()
     return render_template("contacts.html", contacts=items, arten=arten)
 
 
@@ -127,27 +156,46 @@ def delete_contact(cid):
     return redirect(url_for("contacts"))
 
 
+# ---------- Types (Arten) ----------
+@app.route("/types", methods=["GET", "POST"])
+def types_view():
+    if request.method == "POST":
+        name = request.form.get("name", "").strip()
+        if name:
+            db.add_art(name)
+        return redirect(url_for("types_view"))
+    arten = db.list_arten()
+    counts = {a: db.art_usage_count(a) for a in arten}
+    return render_template("types.html", arten=arten, counts=counts)
+
+
+@app.route("/types/<name>/delete", methods=["POST"])
+def delete_type(name):
+    db.delete_art(name)
+    return redirect(url_for("types_view"))
+
+
 # ---------- Templates ----------
 @app.route("/templates", methods=["GET", "POST"])
 def templates_view():
+    arten = db.list_arten()
     if request.method == "POST":
         art = request.form.get("art", "").strip()
         subject = request.form.get("subject", "")
         body = request.form.get("body", "")
         if art:
+            if art not in arten:
+                db.add_art(art)
             db.upsert_template(art, subject, body)
         return redirect(url_for("templates_view", art=art))
 
-    arten = db.list_arten()
     selected = request.args.get("art") or (arten[0] if arten else "")
     current = db.get_template_by_art(selected) if selected else None
-    all_templates = db.list_templates()
     return render_template(
         "templates.html",
         arten=arten,
         selected=selected,
         current=current,
-        all_templates=all_templates,
     )
 
 
@@ -188,15 +236,15 @@ def send_view():
 def send_run():
     art = request.form.get("art", "").strip()
     if not art:
-        flash("Keine Art ausgewählt.", "error")
+        flash("No type selected.", "error")
         return redirect(url_for("send_view"))
     if not graph_mail.is_signed_in():
-        flash("Nicht bei Microsoft angemeldet.", "error")
+        flash("Not connected to Microsoft.", "error")
         return redirect(url_for("auth_view"))
 
     template = db.get_template_by_art(art)
     if not template:
-        flash("Keine Vorlage für diese Art.", "error")
+        flash("No template for this type.", "error")
         return redirect(url_for("send_view", art=art))
 
     contacts_for_art = db.list_contacts(art=art)
@@ -220,7 +268,7 @@ def send_run():
         except Exception as e:
             db.log_send(c["id"], c["email"], art, subject, "failed", str(e))
             failed += 1
-    flash(f"{sent} gesendet, {failed} fehlgeschlagen.", "success" if failed == 0 else "error")
+    flash(f"Sent {sent}, failed {failed}.", "success" if failed == 0 else "error")
     return redirect(url_for("send_view", art=art))
 
 
@@ -230,7 +278,7 @@ def settings_view():
     if request.method == "POST":
         db.set_setting("sender_name", request.form.get("sender_name", "").strip())
         db.set_setting("sender_email", request.form.get("sender_email", "").strip())
-        flash("Einstellungen gespeichert.", "success")
+        flash("Saved.", "success")
         return redirect(url_for("settings_view"))
     return render_template("settings.html")
 
@@ -247,7 +295,6 @@ def auth_start():
         info = graph_mail.start_device_flow()
     except Exception as e:
         return jsonify({"error": str(e)}), 500
-    # Run completion in background thread (blocks until user logs in)
     t = threading.Thread(target=graph_mail.complete_device_flow, daemon=True)
     t.start()
     return jsonify(info)

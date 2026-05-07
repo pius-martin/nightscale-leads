@@ -1,61 +1,71 @@
 {% extends "base.html" %}
-{% block title %}Versand · Nightscale Leads{% endblock %}
+{% block title %}Send · Nightscale{% endblock %}
 {% block content %}
 
-<section class="grid sidebar">
+<div class="page-header">
+    <div>
+        <h1>Send</h1>
+        <div class="subtitle">Preview, then send to all contacts of a type.</div>
+    </div>
+</div>
+
+{% if not arten %}
+    <div class="card">
+        <div class="empty">
+            <p>Create at least one type and template first.</p>
+            <a class="btn btn-primary" href="{{ url_for('types_view') }}">Manage types</a>
+        </div>
+    </div>
+{% else %}
+<div class="split">
     <aside class="card">
-        <h2>Arten</h2>
-        {% if arten %}
+        <h3 style="margin:0 0 12px">Types</h3>
         <ul class="sidebar-list">
             {% for a in arten %}
             <li>
-                <a href="{{ url_for('send_view', art=a) }}" class="{% if a == selected %}active{% endif %}">
-                    {{ a }}
-                </a>
+                <a href="{{ url_for('send_view', art=a) }}" class="{% if a == selected %}active{% endif %}">{{ a }}</a>
             </li>
             {% endfor %}
         </ul>
-        {% else %}
-        <p class="muted">Noch keine Arten.</p>
-        {% endif %}
     </aside>
 
     <div>
         <div class="card">
             <div class="card-header">
-                <h2>Versand · <span class="tag">{{ selected or '—' }}</span></h2>
-                <span class="muted">{{ previews|length }} Empfänger</span>
+                <h2><span class="tag">{{ selected }}</span> · {{ previews|length }} recipient{{ '' if previews|length == 1 else 's' }}</h2>
+                {% if template and previews and signed_in %}
+                <form action="{{ url_for('send_run') }}" method="post" onsubmit="return confirm('Send {{ previews|length }} emails now?')" style="display:inline">
+                    <input type="hidden" name="art" value="{{ selected }}">
+                    <button class="btn btn-primary" type="submit">Send {{ previews|length }} emails</button>
+                </form>
+                {% endif %}
             </div>
 
             {% if not signed_in %}
                 <div class="banner warn">
-                    Nicht bei Microsoft angemeldet.
-                    <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">Jetzt verbinden</a>
+                    <span>Not connected to Microsoft.</span>
+                    <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">Connect now</a>
                 </div>
             {% endif %}
 
             {% if not template %}
-                <p class="muted">Keine Vorlage für „{{ selected }}". <a href="{{ url_for('templates_view', art=selected) }}">Vorlage anlegen</a></p>
+                <div class="empty">
+                    <p>No template for "{{ selected }}".</p>
+                    <a class="btn btn-primary" href="{{ url_for('templates_view', art=selected) }}">Create template</a>
+                </div>
             {% elif not previews %}
-                <p class="muted">Keine Kontakte für „{{ selected }}".</p>
+                <div class="empty"><p>No contacts of type "{{ selected }}" yet.</p></div>
             {% else %}
-                <form action="{{ url_for('send_run') }}" method="post" onsubmit="return confirm('Wirklich {{ previews|length }} E-Mails senden?')">
-                    <input type="hidden" name="art" value="{{ selected }}">
-                    <button class="btn btn-primary" type="submit" {% if not signed_in %}disabled{% endif %}>
-                        {{ previews|length }} E-Mails senden
-                    </button>
-                </form>
-
-                <h3 class="mt">Vorschau</h3>
                 <div class="previews">
                     {% for p in previews %}
                     <details class="preview">
                         <summary>
-                            <span>{{ p.contact.firma }} · {{ p.contact.name }}</span>
+                            <span><strong>{{ p.contact.firma }}</strong> &middot; {{ p.contact.name }}</span>
                             <span class="mono muted">{{ p.contact.email }}</span>
                         </summary>
                         <div class="preview-body">
-                            <div class="kv"><span class="muted">Betreff</span><span>{{ p.subject }}</span></div>
+                            <div class="kv"><span class="muted">Subject</span><span>{{ p.subject }}</span></div>
+                            <div class="kv" style="align-items:flex-start"><span class="muted">Body</span></div>
                             <pre class="mono">{{ p.body }}</pre>
                         </div>
                     </details>
@@ -65,30 +75,31 @@
         </div>
 
         <div class="card mt">
-            <h2>Versand-Log</h2>
+            <div class="card-header"><h2>Send log</h2></div>
             {% if log %}
             <table class="table">
-                <thead><tr><th>Zeit</th><th>An</th><th>Art</th><th>Betreff</th><th>Status</th></tr></thead>
+                <thead><tr><th>Time</th><th>To</th><th>Type</th><th>Subject</th><th>Status</th></tr></thead>
                 <tbody>
                     {% for l in log %}
                     <tr>
-                        <td class="mono muted">{{ l.sent_at }}</td>
+                        <td class="mono muted">{{ l.sent_at.strftime('%Y-%m-%d %H:%M') if l.sent_at else '' }}</td>
                         <td class="mono">{{ l.contact_email }}</td>
                         <td><span class="tag">{{ l.art }}</span></td>
                         <td>{{ l.subject }}</td>
                         <td>
-                            {% if l.status == 'sent' %}<span class="badge ok">gesendet</span>
-                            {% else %}<span class="badge err" title="{{ l.error }}">fehler</span>{% endif %}
+                            {% if l.status == 'sent' %}<span class="badge ok">sent</span>
+                            {% else %}<span class="badge err" title="{{ l.error }}">failed</span>{% endif %}
                         </td>
                     </tr>
                     {% endfor %}
                 </tbody>
             </table>
             {% else %}
-                <p class="muted">Noch nichts gesendet.</p>
+                <div class="empty"><p>Nothing sent yet.</p></div>
             {% endif %}
         </div>
     </div>
-</section>
+</div>
+{% endif %}
 
 {% endblock %}

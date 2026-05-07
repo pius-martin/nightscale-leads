@@ -1,22 +1,42 @@
 {% extends "base.html" %}
-{% block title %}Einstellungen{% endblock %}
+{% block title %}Settings · Nightscale{% endblock %}
+{% block container_class %} narrow{% endblock %}
 {% block content %}
 
-<section class="card max-narrow">
-    <h2>Einstellungen</h2>
-    <p class="muted">Diese Werte werden für alle ausgehenden E-Mails verwendet.</p>
+<div class="page-header">
+    <div>
+        <h1>Settings</h1>
+        <div class="subtitle">These values are used for every outgoing email.</div>
+    </div>
+</div>
+
+<div class="card">
     <form method="post" class="form">
-        <label>Absender-Name (Anzeige)
-            <input type="text" name="sender_name" value="{{ settings.get('sender_name', '') }}" placeholder="z.B. Pius Martin · Nightscale">
+        <label>Sender name (display)
+            <input type="text" name="sender_name" value="{{ settings.get('sender_name', '') }}" placeholder="e.g. Pius Martin · Nightscale">
+            <span class="hint">What recipients see in their inbox.</span>
         </label>
-        <label>Absender-E-Mail (optional Override)
+        <label>Sender email (override)
             <input type="email" name="sender_email" value="{{ settings.get('sender_email', '') }}" placeholder="pius@nightscale.ai">
-            <small class="muted" style="text-transform:none;letter-spacing:normal">Leer lassen, um das angemeldete Konto zu verwenden. Override funktioniert nur, wenn du Sende-Rechte für diese Adresse hast (Send-As / Shared Mailbox).</small>
+            <span class="hint">Leave empty to use the signed-in account. Override only works if you have Send-As permission.</span>
         </label>
         <div class="row">
-            <button type="submit" class="btn btn-primary">Speichern</button>
+            <button type="submit" class="btn btn-primary">Save</button>
         </div>
     </form>
-</section>
+</div>
+
+<div class="card mt">
+    <div class="card-header"><h2>Microsoft 365</h2></div>
+    {% if signed_in %}
+        <p style="margin:0 0 14px">Connected as <strong>{{ account }}</strong>.</p>
+        <form action="{{ url_for('auth_signout') }}" method="post">
+            <button class="btn btn-danger" type="submit">Sign out from Microsoft</button>
+        </form>
+    {% else %}
+        <p style="margin:0 0 14px" class="muted">Not connected.</p>
+        <a class="btn btn-primary" href="{{ url_for('auth_view') }}">Connect Microsoft</a>
+    {% endif %}
+</div>
 
 {% endblock %}

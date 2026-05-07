@@ -1,0 +1,50 @@
+{% extends "base.html" %}
+{% block title %}Types · Nightscale{% endblock %}
+{% block container_class %} narrow{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1>Types</h1>
+        <div class="subtitle">Categories for your contacts (e.g. Investor, Partner, Lead).</div>
+    </div>
+</div>
+
+<div class="card">
+    <div class="card-header">
+        <h2>Add new type</h2>
+    </div>
+    <form method="post" class="form">
+        <label>Name
+            <input type="text" name="name" required autocomplete="off" placeholder="e.g. Investor">
+        </label>
+        <div class="row">
+            <button type="submit" class="btn btn-primary">Add type</button>
+        </div>
+    </form>
+</div>
+
+<div class="card mt">
+    <div class="card-header">
+        <h2>Existing types</h2>
+    </div>
+    {% if arten %}
+        <div class="stack">
+            {% for a in arten %}
+            <div class="type-chip">
+                <div>
+                    <span class="type-chip-name">{{ a }}</span>
+                    <span class="type-chip-meta">{{ counts[a] }} contact{{ '' if counts[a] == 1 else 's' }}</span>
+                </div>
+                <form action="{{ url_for('delete_type', name=a) }}" method="post" onsubmit="return confirm('Delete type \'{{ a }}\'? Contacts assigned to it will keep the label but you won\'t be able to pick it again.')">
+                    <button class="btn btn-danger btn-sm" type="submit">Delete</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
+    {% else %}
+        <div class="empty"><p>No types yet. Create one above.</p></div>
+    {% endif %}
+</div>
+
+{% endblock %}

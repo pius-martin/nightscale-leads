@@ -1,0 +1,24 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Database not reachable</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="error-screen">
+        <div class="card login-card" style="max-width: 520px">
+            <div class="brand"><span class="dot"></span><span>nightscale</span></div>
+            <h2 style="margin-top:24px">Database not reachable</h2>
+            <p class="muted">{{ error }}</p>
+            <p class="muted" style="margin-top:16px">
+                On Railway: open the web service → <strong>Variables</strong> → add
+                <code class="mono">DATABASE_URL</code> as a reference to
+                <code class="mono">${{ '{{Postgres.DATABASE_URL}}' }}</code>.
+                Then redeploy.
+            </p>
+        </div>
+    </main>
+</body>
+</html>
