@@ -70,13 +70,19 @@ p { margin: 0 0 12px; }
     display: flex;
     align-items: center;
     gap: 12px;
-    font-weight: 700;
-    letter-spacing: 0.16em;
     white-space: nowrap;
     color: var(--text);
     text-decoration: none;
 }
-.brand:hover { color: var(--accent); }
+.brand:hover { opacity: 0.85; }
+.brand-logo {
+    height: 26px;
+    width: auto;
+    display: block;
+    /* keep crisp on retina; transparent PNG */
+}
+.brand-logo-lg { height: 40px; }
+/* Legacy fallback (kept in case image fails to load) */
 .brand-name {
     font-size: 16px;
     font-weight: 700;
@@ -89,7 +95,6 @@ p { margin: 0 0 12px; }
     background: var(--accent);
     box-shadow: 0 0 14px rgba(255,255,255,0.5);
 }
-.login-card .brand-name { font-size: 18px; }
 .nav { display: flex; gap: 4px; flex: 1; margin-left: 8px; }
 .nav a {
     padding: 7px 14px;

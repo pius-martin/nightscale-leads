@@ -11,8 +11,7 @@
 <body>
     <header class="topbar">
         <a href="{{ url_for('contacts') }}" class="brand">
-            <span class="dot"></span>
-            <span class="brand-name">NIGHTSCALE</span>
+            <img src="{{ url_for('static', filename='logo.png') }}" alt="Nightscale" class="brand-logo">
         </a>
         <nav class="nav">
             <a href="{{ url_for('contacts') }}" class="{% if request.endpoint in ['contacts','edit_contact'] %}active{% endif %}">Contacts</a>
