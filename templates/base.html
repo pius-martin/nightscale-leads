@@ -28,6 +28,9 @@
             {% else %}
                 <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">Microsoft verbinden</a>
             {% endif %}
+            <form action="{{ url_for('logout') }}" method="post" style="display:inline">
+                <button class="btn btn-ghost btn-sm" type="submit" title="Abmelden">⏻</button>
+            </form>
         </div>
     </header>
 

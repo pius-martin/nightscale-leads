@@ -47,54 +47,69 @@ Unter `/settings`:
 - **Absender-E-Mail (optional)**: leer lassen für das angemeldete Konto. Override
   funktioniert nur wenn du Send-As-Rechte hast (Shared Mailbox).
 
-## Deployment
+## Deployment auf Railway (empfohlen)
 
-### Option A — World4You „MyService Webspace" mit Python
+Railway hostet die App, eine Subdomain bei World4You zeigt per CNAME drauf.
 
-World4You-Standardpläne (Webspace) sind primär PHP/MySQL. Für Python brauchst du
-einen **Webspace mit Python-Support** (Passenger/WSGI) oder einen **Server vServer**.
+### 1. Railway-Projekt anlegen
 
-Wenn dein Plan Python via Passenger unterstützt (wie bei den meisten neueren Webspaces):
+1. Auf https://railway.app einloggen (mit GitHub).
+2. **+ New Project → Deploy from GitHub repo** → `pius-martin/nightscale-leads` wählen.
+3. Branch: `claude/contact-email-automation-wOaF9` (oder vorher in `main` mergen).
+4. Railway erkennt Python automatisch und baut über Nixpacks; die `Procfile` wird
+   verwendet.
 
-1. Per FTP/SFTP alle Dateien ins Webspace-Verzeichnis hochladen (z.B. `/leads/`).
-2. SSH-Zugang nutzen (im World4You Kundenmenü aktivieren) und installieren:
-   ```bash
-   python3 -m venv .venv
-   .venv/bin/pip install -r requirements.txt
-   ```
-3. `passenger_wsgi.py` (für Passenger) ist im Repo enthalten.
-4. Im World4You-Kundenmenü: **Domain → Subdomain anlegen**, z.B. `leads.deine-domain.at`,
-   und auf den App-Ordner zeigen lassen.
-5. `.env` direkt am Server ausfüllen (Werte aus Azure).
-6. **Wichtig**: Beim ersten Login Device-Code im Browser des Servers
-   _oder_ lokal abschließen (das Token-File `token_cache.bin` dann auf den Server kopieren).
+### 2. Environment Variables setzen
 
-### Option B — vServer / VPS (empfohlen)
+Im Railway-Service unter **Variables**:
 
-Auf einem kleinen Linux-VPS mit Nginx-Reverse-Proxy + Gunicorn:
+| Variable           | Wert                                         |
+|--------------------|----------------------------------------------|
+| `AZURE_CLIENT_ID`  | `42f15015-c60a-4472-97ca-d19f2417c66e`        |
+| `AZURE_TENANT_ID`  | `bc7f9f38-30a5-4eda-a455-0f714ba84fab`        |
+| `FLASK_SECRET_KEY` | Langer Zufallsstring (z.B. `openssl rand -hex 32`) |
+| `APP_PASSWORD`     | Passwort für den App-Zugang                   |
+| `SENDER_EMAIL`     | `pius@nightscale.ai`                          |
+| `DATA_DIR`         | `/data`                                       |
 
-```bash
-gunicorn -w 2 -b 127.0.0.1:8000 app:app
-```
+### 3. Volume für persistente Daten
 
-Nginx-Config:
-```
-server {
-    server_name leads.deine-domain.at;
-    location / {
-        proxy_pass http://127.0.0.1:8000;
-        proxy_set_header Host $host;
-        proxy_set_header X-Real-IP $remote_addr;
-    }
-}
-```
+SQLite und Token-Cache müssen Restarts/Deploys überleben:
 
-DNS bei World4You: A-Record `leads.deine-domain.at` → VPS-IP.
+1. Service → **Settings → Volumes → + New Volume**
+2. Mount Path: `/data`
+3. Größe: 1 GB reicht.
 
-### Option C — Lokal nur, Domain später
+Ohne Volume verlierst du Kontakte, Templates und den Microsoft-Login bei jedem
+Redeploy.
 
-Du kannst die App einfach am Mac laufen lassen. Wenn du später öffentlich
-hosten willst, hilft Option B.
+### 4. Erster Start + Microsoft-Login
+
+1. Railway gibt dir eine URL wie `https://nightscale-leads-production.up.railway.app`.
+2. Aufrufen → mit deinem `APP_PASSWORD` einloggen.
+3. „Microsoft verbinden" klicken → Code merken → im neuen Tab auf
+   https://microsoft.com/devicelogin Code eingeben → mit `pius@nightscale.ai` einloggen.
+4. Token wird in `/data/token_cache.bin` gespeichert (überlebt Deploys).
+
+### 5. World4You-Domain anbinden
+
+In Railway: Service → **Settings → Networking → Custom Domain** → z.B.
+`leads.nightscale.ai` eingeben. Railway zeigt dir einen CNAME-Target (z.B.
+`xyz.up.railway.app`).
+
+Im **World4You Kundenmenü** → Domain → DNS-Verwaltung:
+- Neuer **CNAME-Record**:
+  - Name/Host: `leads`
+  - Ziel: der von Railway gezeigte Wert (`xyz.up.railway.app`)
+  - TTL: Standard (3600)
+
+Nach einigen Minuten ist `https://leads.nightscale.ai` live (Railway stellt
+automatisch ein Let's-Encrypt-Zertifikat aus).
+
+> **Hinweis**: Für die Apex-Domain (`nightscale.ai` ohne Subdomain) braucht
+> es ALIAS/ANAME, das World4You nicht anbietet. Daher Subdomain nehmen.
+
+## Lokal entwickeln
 
 ## Sicherheit
 

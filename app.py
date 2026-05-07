@@ -1,7 +1,8 @@
 import os
 import re
 import threading
-from flask import Flask, render_template, request, redirect, url_for, jsonify, flash
+from functools import wraps
+from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session
 from dotenv import load_dotenv
 
 import db
@@ -11,8 +12,55 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-key-change-me")
+app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days
+
+APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 
 db.init_db()
+
+
+def login_required(f):
+    @wraps(f)
+    def wrapper(*args, **kwargs):
+        if not APP_PASSWORD:
+            return f(*args, **kwargs)
+        if session.get("authed"):
+            return f(*args, **kwargs)
+        return redirect(url_for("login", next=request.path))
+    return wrapper
+
+
+@app.before_request
+def gate():
+    if not APP_PASSWORD:
+        return None
+    public = {"login", "static"}
+    if request.endpoint in public:
+        return None
+    if not session.get("authed"):
+        return redirect(url_for("login", next=request.path))
+    return None
+
+
+@app.route("/login", methods=["GET", "POST"])
+def login():
+    if not APP_PASSWORD:
+        return redirect(url_for("contacts"))
+    error = None
+    if request.method == "POST":
+        if request.form.get("password", "") == APP_PASSWORD:
+            session.permanent = True
+            session["authed"] = True
+            nxt = request.args.get("next") or url_for("contacts")
+            return redirect(nxt)
+        error = "Falsches Passwort."
+    return render_template("login.html", error=error)
+
+
+@app.route("/logout", methods=["POST"])
+def logout():
+    session.clear()
+    return redirect(url_for("login"))
 
 
 def render_template_text(text: str, contact: dict) -> str:

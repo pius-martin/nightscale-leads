@@ -6,7 +6,9 @@ import requests
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 SCOPES = ["Mail.Send"]
-CACHE_PATH = os.path.join(os.path.dirname(__file__), "token_cache.bin")
+DATA_DIR = os.environ.get("DATA_DIR", os.path.dirname(__file__))
+os.makedirs(DATA_DIR, exist_ok=True)
+CACHE_PATH = os.path.join(DATA_DIR, "token_cache.bin")
 
 _lock = threading.Lock()
 _pending_flow = None

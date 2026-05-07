@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Login · Nightscale Leads</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="login-screen">
+        <div class="card max-narrow">
+            <div class="brand" style="margin-bottom:24px">
+                <span class="dot"></span>
+                <span>nightscale · leads</span>
+            </div>
+            <form method="post" class="form">
+                <label>Passwort
+                    <input type="password" name="password" required autofocus>
+                </label>
+                {% if error %}<div class="flash error">{{ error }}</div>{% endif %}
+                <button type="submit" class="btn btn-primary">Anmelden</button>
+            </form>
+        </div>
+    </main>
+</body>
+</html>

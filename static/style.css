@@ -277,6 +277,16 @@ h3 { font-size: 14px; color: var(--text-dim); text-transform: uppercase; letter-
 .kv { display: flex; gap: 12px; align-items: baseline; padding: 4px 0; }
 .kv .muted { min-width: 70px; font-size: 11px; text-transform: uppercase; letter-spacing: 0.05em; }
 
+/* Login screen */
+.login-screen {
+    min-height: 100vh;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    padding: 24px;
+}
+.login-screen .card { width: 100%; max-width: 380px; }
+
 /* Quill dark theme overrides */
 #editor-toolbar.ql-toolbar.ql-snow {
     border: 1px solid var(--border-strong);
