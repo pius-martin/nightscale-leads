@@ -9,122 +9,80 @@
 <div class="page-header">
     <div>
         <h1>Settings</h1>
-        <div class="subtitle">Sender details and connected Microsoft accounts.</div>
+        <div class="subtitle">Each connected Microsoft 365 account has its own sender name, sender email, and signature.</div>
     </div>
+    <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">+ Add account</a>
 </div>
 
-<div class="card">
-    <form method="post" class="form" id="settings-form">
-        <label>Sender name (display)
-            <input type="text" name="sender_name" value="{{ settings.get('sender_name', '') }}" placeholder="e.g. Pius Martin · Nightscale">
-            <span class="hint">What recipients see in their inbox.</span>
-        </label>
-        <label>Sender email (override)
-            <input type="email" name="sender_email" value="{{ settings.get('sender_email', '') }}" placeholder="pius@nightscale.ai">
-            <span class="hint">Leave empty to use the signed-in account. Override only works if you have Send-As permission.</span>
-        </label>
-        <label>Email signature
-            <span class="hint">Appended to every email. Supports placeholders like {{ '{{name}}' }}, {{ '{{firma}}' }}.</span>
-        </label>
-        <div id="sig-toolbar">
-            <span class="ql-formats">
-                <button class="ql-bold"></button>
-                <button class="ql-italic"></button>
-                <button class="ql-underline"></button>
-            </span>
-            <span class="ql-formats">
-                <button class="ql-link"></button>
-            </span>
-            <span class="ql-formats">
-                <button class="ql-clean"></button>
-            </span>
+{% if not ms_accounts %}
+    <div class="card">
+        <div class="empty">
+            <p>No Microsoft 365 accounts connected yet.</p>
+            <a class="btn btn-primary" href="{{ url_for('auth_view') }}">Connect Microsoft</a>
         </div>
-        <div id="sig-editor"></div>
-        <textarea name="email_signature" id="sig-input" hidden>{{ settings.get('email_signature', '') }}</textarea>
-
-        <div class="row">
-            <button type="submit" class="btn btn-primary">Save</button>
-        </div>
-    </form>
-</div>
-
-<div class="card mt">
-    <div class="card-header">
-        <h2>Microsoft 365 accounts</h2>
-        <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">+ Add account</a>
     </div>
-    {% if ms_accounts %}
-        <p class="muted" style="margin:0 0 16px; font-size:13px">
-            Each account can have its own signature. If left empty, the global signature above is used.
-        </p>
-        <div class="stack" style="gap:18px">
-            {% for a in ms_accounts %}
-            <div class="account-card">
-                <div class="account-card-header">
-                    <span class="type-chip-name">{{ a.username }}</span>
-                    <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')">
-                        <input type="hidden" name="username" value="{{ a.username }}">
-                        <input type="hidden" name="from" value="settings">
-                        <button class="btn btn-danger btn-sm" type="submit">Disconnect</button>
-                    </form>
-                </div>
-                <label style="margin-top:14px; display:flex; flex-direction:column; gap:8px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.07em; font-weight:500">
-                    Signature for this account
-                </label>
-                <div id="acct-toolbar-{{ loop.index0 }}" class="acct-toolbar">
-                    <span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
-                    <span class="ql-formats"><button class="ql-link"></button></span>
-                    <span class="ql-formats"><button class="ql-clean"></button></span>
-                </div>
-                <div id="acct-editor-{{ loop.index0 }}" class="acct-editor"></div>
-                <textarea name="email_signature__{{ a.username }}" id="acct-input-{{ loop.index0 }}" form="settings-form" hidden data-username="{{ a.username }}">{{ account_signatures.get(a.username, '') }}</textarea>
+{% else %}
+    {% for a in ms_accounts %}
+    {% set s = account_settings.get(a.username, {}) %}
+    <div class="card{% if not loop.first %} mt{% endif %}" id="acc-{{ a.username }}">
+        <div class="card-header">
+            <h2>{{ a.username }}</h2>
+            <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')">
+                <input type="hidden" name="username" value="{{ a.username }}">
+                <input type="hidden" name="from" value="settings">
+                <button class="btn btn-danger btn-sm" type="submit">Disconnect</button>
+            </form>
+        </div>
+        <form action="{{ url_for('settings_account') }}" method="post" class="form" id="acc-form-{{ loop.index0 }}">
+            <input type="hidden" name="username" value="{{ a.username }}">
+            <label>Sender name (display)
+                <input type="text" name="sender_name" value="{{ s.get('sender_name', '') }}" placeholder="e.g. Pius Martin · Nightscale">
+                <span class="hint">What recipients see in their inbox.</span>
+            </label>
+            <label>Sender email (override)
+                <input type="email" name="sender_email" value="{{ s.get('sender_email', '') }}" placeholder="{{ a.username }}">
+                <span class="hint">Leave empty to use this account's address. Override only works with Send-As permission.</span>
+            </label>
+            <label>Email signature
+                <span class="hint">Appended to every email sent from this account. Supports placeholders like {{ '{{name}}' }}, {{ '{{firma}}' }}.</span>
+            </label>
+            <div id="sig-toolbar-{{ loop.index0 }}" class="sig-toolbar">
+                <span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
+                <span class="ql-formats"><button class="ql-link"></button></span>
+                <span class="ql-formats"><button class="ql-clean"></button></span>
             </div>
-            {% endfor %}
-        </div>
-    {% else %}
-        <div class="empty"><p>No accounts connected yet.</p>
-        <a class="btn btn-primary" href="{{ url_for('auth_view') }}">Connect Microsoft</a></div>
-    {% endif %}
-</div>
+            <div id="sig-editor-{{ loop.index0 }}" class="sig-editor"></div>
+            <textarea name="email_signature" id="sig-input-{{ loop.index0 }}" hidden>{{ s.get('email_signature', '') }}</textarea>
+            <div class="row">
+                <button type="submit" class="btn btn-primary">Save</button>
+            </div>
+        </form>
+    </div>
+    {% endfor %}
+{% endif %}
 
 {% endblock %}
 {% block scripts %}
+{% if ms_accounts %}
 <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
 <script>
-const initial = {{ settings.get('email_signature', '') | tojson }};
-const sig = new Quill('#sig-editor', {
-    theme: 'snow',
-    modules: { toolbar: '#sig-toolbar' },
-    placeholder: 'Best,\nPius'
-});
-if (initial) {
-    if (initial.trim().startsWith('<')) sig.clipboard.dangerouslyPasteHTML(initial);
-    else sig.setText(initial);
-}
-
-// Per-account signature editors
-const acctEditors = [];
-document.querySelectorAll('[id^="acct-editor-"]').forEach(el => {
-    const idx = el.id.replace('acct-editor-', '');
-    const input = document.getElementById('acct-input-' + idx);
-    const initialAcct = input.value;
-    const q = new Quill('#acct-editor-' + idx, {
+document.querySelectorAll('[id^="sig-editor-"]').forEach(el => {
+    const idx = el.id.replace('sig-editor-', '');
+    const input = document.getElementById('sig-input-' + idx);
+    const initial = input.value;
+    const q = new Quill('#sig-editor-' + idx, {
         theme: 'snow',
-        modules: { toolbar: '#acct-toolbar-' + idx },
-        placeholder: 'Leave empty to use the global signature above'
+        modules: { toolbar: '#sig-toolbar-' + idx },
+        placeholder: 'Best,\nName'
     });
-    if (initialAcct) {
-        if (initialAcct.trim().startsWith('<')) q.clipboard.dangerouslyPasteHTML(initialAcct);
-        else q.setText(initialAcct);
+    if (initial) {
+        if (initial.trim().startsWith('<')) q.clipboard.dangerouslyPasteHTML(initial);
+        else q.setText(initial);
     }
-    acctEditors.push({ q, input });
-});
-
-document.getElementById('settings-form').addEventListener('submit', () => {
-    document.getElementById('sig-input').value = (sig.getText().trim() === '') ? '' : sig.root.innerHTML;
-    acctEditors.forEach(({ q, input }) => {
+    document.getElementById('acc-form-' + idx).addEventListener('submit', () => {
         input.value = (q.getText().trim() === '') ? '' : q.root.innerHTML;
     });
 });
 </script>
+{% endif %}
 {% endblock %}

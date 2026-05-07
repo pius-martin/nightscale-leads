@@ -110,6 +110,22 @@ def _signature_for_account(username: str | None) -> str:
     return db.get_setting("email_signature", "")
 
 
+def _sender_name_for(username: str | None) -> str:
+    if username:
+        v = db.get_setting(f"sender_name_{username}", "")
+        if v:
+            return v
+    return db.get_setting("sender_name", "")
+
+
+def _sender_email_for(username: str | None) -> str:
+    if username:
+        v = db.get_setting(f"sender_email_{username}", "")
+        if v:
+            return v
+    return db.get_setting("sender_email", "") or os.environ.get("SENDER_EMAIL", "")
+
+
 SAMPLE_COMPANIES = [
     "Acme GmbH", "Beta Holdings", "Café Sonne", "Restaurant Alpina",
     "Vorarlberger Hof", "Bäckerei Müller", "Hotel Bergblick", "Studio Nord",
@@ -474,8 +490,8 @@ def template_test_send():
         return redirect(url_for("templates_view", art=art, variant=variant))
 
     contact = _random_contact(art, variant, account)
-    sender_name = db.get_setting("sender_name", "")
-    sender_email = db.get_setting("sender_email", "") or os.environ.get("SENDER_EMAIL", "")
+    sender_name = _sender_name_for(account)
+    sender_email = _sender_email_for(account)
     signature = _signature_for_account(account)
 
     subject = "[TEST] " + render_template_text(template["subject"], contact)
@@ -655,8 +671,8 @@ def send_run():
 
     contacts_for_art = db.list_contacts(art=art)
     already = db.sent_contact_ids(art) if mode == "new" else set()
-    sender_name = db.get_setting("sender_name", "")
-    sender_email = db.get_setting("sender_email", "") or os.environ.get("SENDER_EMAIL", "")
+    sender_name = _sender_name_for(account)
+    sender_email = _sender_email_for(account)
     signature = _signature_for_account(account)
     sent, failed, skipped = 0, 0, 0
     for c in contacts_for_art:
@@ -698,29 +714,41 @@ def send_run():
 
 
 # ---------- Settings ----------
-@app.route("/settings", methods=["GET", "POST"])
+@app.route("/settings", methods=["GET"])
 def settings_view():
-    if request.method == "POST":
-        db.set_setting("sender_name", request.form.get("sender_name", "").strip())
-        db.set_setting("sender_email", request.form.get("sender_email", "").strip())
-        db.set_setting("email_signature", request.form.get("email_signature", ""))
-        # Per-account signatures: form fields named email_signature__<username>
-        for key, val in request.form.items():
-            if key.startswith("email_signature__"):
-                username = key[len("email_signature__"):]
-                if username:
-                    db.set_setting(f"email_signature_{username}", val)
-        flash("Saved.", "success")
-        return redirect(url_for("settings_view"))
     accounts = graph_mail.list_accounts()
-    account_signatures = {
-        a["username"]: db.get_setting(f"email_signature_{a['username']}", "")
-        for a in accounts
-    }
-    return render_template(
-        "settings.html",
-        account_signatures=account_signatures,
-    )
+    # Per-account fields with fallback to legacy global settings so existing
+    # users see their old values pre-filled on the first connected account.
+    account_settings = {}
+    legacy_name = db.get_setting("sender_name", "")
+    legacy_email = db.get_setting("sender_email", "")
+    legacy_sig = db.get_setting("email_signature", "")
+    for i, a in enumerate(accounts):
+        u = a["username"]
+        s = {
+            "sender_name": db.get_setting(f"sender_name_{u}", ""),
+            "sender_email": db.get_setting(f"sender_email_{u}", ""),
+            "email_signature": db.get_setting(f"email_signature_{u}", ""),
+        }
+        if i == 0:
+            s["sender_name"] = s["sender_name"] or legacy_name
+            s["sender_email"] = s["sender_email"] or legacy_email
+            s["email_signature"] = s["email_signature"] or legacy_sig
+        account_settings[u] = s
+    return render_template("settings.html", account_settings=account_settings)
+
+
+@app.route("/settings/account", methods=["POST"])
+def settings_account():
+    username = request.form.get("username", "").strip()
+    if not username:
+        flash("Missing account.", "error")
+        return redirect(url_for("settings_view"))
+    db.set_setting(f"sender_name_{username}", request.form.get("sender_name", "").strip())
+    db.set_setting(f"sender_email_{username}", request.form.get("sender_email", "").strip())
+    db.set_setting(f"email_signature_{username}", request.form.get("email_signature", ""))
+    flash(f"Saved settings for {username}.", "success")
+    return redirect(url_for("settings_view") + f"#acc-{username}")
 
 
 # ---------- Auth (Microsoft) ----------
