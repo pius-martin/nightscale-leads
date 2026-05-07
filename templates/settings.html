@@ -9,7 +9,7 @@
 <div class="page-header">
     <div>
         <h1>Settings</h1>
-        <div class="subtitle">These values are used for every outgoing email.</div>
+        <div class="subtitle">Sender details and connected Microsoft accounts.</div>
     </div>
 </div>
 
@@ -49,15 +49,28 @@
 </div>
 
 <div class="card mt">
-    <div class="card-header"><h2>Microsoft 365</h2></div>
-    {% if signed_in %}
-        <p style="margin:0 0 14px">Connected as <strong>{{ account }}</strong>.</p>
-        <form action="{{ url_for('auth_signout') }}" method="post">
-            <button class="btn btn-danger" type="submit">Sign out from Microsoft</button>
-        </form>
+    <div class="card-header">
+        <h2>Microsoft 365 accounts</h2>
+        <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">+ Add account</a>
+    </div>
+    {% if ms_accounts %}
+        <div class="stack">
+            {% for a in ms_accounts %}
+            <div class="type-chip">
+                <div>
+                    <span class="type-chip-name">{{ a.username }}</span>
+                </div>
+                <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')">
+                    <input type="hidden" name="username" value="{{ a.username }}">
+                    <input type="hidden" name="from" value="settings">
+                    <button class="btn btn-danger btn-sm" type="submit">Disconnect</button>
+                </form>
+            </div>
+            {% endfor %}
+        </div>
     {% else %}
-        <p style="margin:0 0 14px" class="muted">Not connected.</p>
-        <a class="btn btn-primary" href="{{ url_for('auth_view') }}">Connect Microsoft</a>
+        <div class="empty"><p>No accounts connected yet.</p>
+        <a class="btn btn-primary" href="{{ url_for('auth_view') }}">Connect Microsoft</a></div>
     {% endif %}
 </div>
 

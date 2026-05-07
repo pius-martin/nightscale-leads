@@ -29,11 +29,13 @@ CREATE TABLE IF NOT EXISTS contacts (
 
 CREATE TABLE IF NOT EXISTS templates (
     id SERIAL PRIMARY KEY,
-    art TEXT NOT NULL UNIQUE,
+    art TEXT NOT NULL,
+    variant TEXT NOT NULL DEFAULT 'personal',
     subject TEXT NOT NULL,
     body TEXT NOT NULL,
     footer TEXT NOT NULL DEFAULT '',
-    updated_at TIMESTAMPTZ DEFAULT NOW()
+    updated_at TIMESTAMPTZ DEFAULT NOW(),
+    UNIQUE (art, variant)
 );
 
 CREATE TABLE IF NOT EXISTS arten (
@@ -63,6 +65,18 @@ MIGRATIONS = """
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS footer TEXT NOT NULL DEFAULT '';
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'personal';
+
+-- Replace the old single-art unique constraint with a (art, variant) one
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'templates_art_key') THEN
+        ALTER TABLE templates DROP CONSTRAINT templates_art_key;
+    END IF;
+    IF NOT EXISTS (SELECT 1 FROM pg_constraint WHERE conname = 'templates_art_variant_key') THEN
+        ALTER TABLE templates ADD CONSTRAINT templates_art_variant_key UNIQUE (art, variant);
+    END IF;
+END $$;
 
 -- Migrate single 'name' into first_name/last_name and drop the old column
 DO $$
@@ -215,34 +229,63 @@ def sent_contact_ids(art: str) -> set:
 
 
 # Templates
+VARIANTS = ("personal", "anonymous")
+
+
 def list_templates():
     with get_conn() as c:
         cur = _dict_cursor(c)
-        cur.execute("SELECT * FROM templates ORDER BY LOWER(art)")
+        cur.execute("SELECT * FROM templates ORDER BY LOWER(art), variant")
         return [dict(r) for r in cur.fetchall()]
 
 
-def get_template_by_art(art: str):
+def get_template(art: str, variant: str = "personal"):
+    if variant not in VARIANTS:
+        variant = "personal"
     with get_conn() as c:
         cur = _dict_cursor(c)
-        cur.execute("SELECT * FROM templates WHERE art=%s", (art,))
+        cur.execute("SELECT * FROM templates WHERE art=%s AND variant=%s", (art, variant))
         row = cur.fetchone()
         return dict(row) if row else None
 
 
-def upsert_template(art, subject, body, footer=""):
+def get_templates_for_art(art: str) -> dict:
+    """Return {variant: row} for a given art."""
+    with get_conn() as c:
+        cur = _dict_cursor(c)
+        cur.execute("SELECT * FROM templates WHERE art=%s", (art,))
+        return {r["variant"]: dict(r) for r in cur.fetchall()}
+
+
+def pick_template_for_contact(art: str, contact: dict):
+    has_name = bool(
+        (contact.get("first_name") or "").strip()
+        or (contact.get("last_name") or "").strip()
+    )
+    primary = "personal" if has_name else "anonymous"
+    t = get_template(art, primary)
+    if t is None:
+        # fallback to the other variant if only one exists
+        other = "anonymous" if primary == "personal" else "personal"
+        t = get_template(art, other)
+    return t
+
+
+def upsert_template(art, variant, subject, body, footer=""):
+    if variant not in VARIANTS:
+        variant = "personal"
     with get_conn() as c, c.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO templates (art, subject, body, footer, updated_at)
-            VALUES (%s, %s, %s, %s, NOW())
-            ON CONFLICT (art) DO UPDATE SET
+            INSERT INTO templates (art, variant, subject, body, footer, updated_at)
+            VALUES (%s, %s, %s, %s, %s, NOW())
+            ON CONFLICT (art, variant) DO UPDATE SET
                 subject = EXCLUDED.subject,
                 body = EXCLUDED.body,
                 footer = EXCLUDED.footer,
                 updated_at = NOW()
             """,
-            (art.strip(), subject, body, footer or ""),
+            (art.strip(), variant, subject, body, footer or ""),
         )
 
 

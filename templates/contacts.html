@@ -21,14 +21,15 @@
     {% else %}
     <form method="post" class="form">
         <label>Company
-            <input type="text" name="firma" required autocomplete="off" placeholder="Acme Inc.">
+            <input type="text" name="firma" autocomplete="off" placeholder="Acme Inc.">
+            <span class="hint">Required when there is no person name.</span>
         </label>
         <div class="row" style="gap:14px">
             <label style="flex:1; min-width:180px">First name
-                <input type="text" name="first_name" required autocomplete="off" placeholder="Jane">
+                <input type="text" name="first_name" autocomplete="off" placeholder="Jane">
             </label>
             <label style="flex:1; min-width:180px">Last name
-                <input type="text" name="last_name" required autocomplete="off" placeholder="Doe">
+                <input type="text" name="last_name" autocomplete="off" placeholder="Doe">
             </label>
         </div>
         <div class="row" style="gap:14px">
@@ -53,10 +54,38 @@
 
 <div class="card mt">
     <div class="card-header">
+        <h2>Import from CSV / Excel</h2>
+    </div>
+    <p class="muted" style="margin:0 0 14px">
+        Required columns: <code class="mono">email</code> and <code class="mono">type</code>, plus at least one of
+        <code class="mono">company</code>, <code class="mono">first_name</code>, <code class="mono">last_name</code>.
+        Optional: <code class="mono">notes</code>. German aliases (firma, vorname, nachname, art, notizen) also work.
+        Unknown types are auto-created.
+    </p>
+    <form action="{{ url_for('contacts_import') }}" method="post" enctype="multipart/form-data" class="form">
+        <div class="row" style="gap:10px; align-items:center">
+            <input type="file" name="file" accept=".csv,.xlsx,.xlsm" required style="color:var(--text); padding:8px 0">
+            <button type="submit" class="btn btn-primary">Upload</button>
+        </div>
+    </form>
+</div>
+
+<div class="card mt">
+    <div class="card-header">
         <h2>All contacts</h2>
+        {% if contacts %}
+        <div class="row" style="gap:10px">
+            <input type="search" id="contact-search" placeholder="Search…" autocomplete="off"
+                   style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:8px 12px; border-radius:6px; min-width:200px; font-size:13px">
+            <select id="contact-filter" style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:8px 12px; border-radius:6px; font-size:13px">
+                <option value="">All types</option>
+                {% for a in arten %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+            </select>
+        </div>
+        {% endif %}
     </div>
     {% if contacts %}
-    <table class="table">
+    <table class="table" id="contacts-table">
         <thead>
             <tr>
                 <th>Company</th>
@@ -69,7 +98,7 @@
         </thead>
         <tbody>
             {% for c in contacts %}
-            <tr>
+            <tr data-firma="{{ c.firma|lower }}" data-firstname="{{ c.first_name|lower }}" data-lastname="{{ c.last_name|lower }}" data-email="{{ c.email|lower }}" data-art="{{ c.art }}">
                 <td>{{ c.firma }}</td>
                 <td>{{ c.first_name }}</td>
                 <td>{{ c.last_name }}</td>
@@ -85,9 +114,38 @@
             {% endfor %}
         </tbody>
     </table>
+    <p id="contacts-empty-result" class="muted" style="display:none; padding:16px 18px; text-align:center">No matches.</p>
     {% else %}
         <div class="empty"><p>No contacts yet.</p></div>
     {% endif %}
 </div>
 
+{% endblock %}
+{% block scripts %}
+<script>
+(function() {
+    const search = document.getElementById('contact-search');
+    const filter = document.getElementById('contact-filter');
+    const table = document.getElementById('contacts-table');
+    const emptyMsg = document.getElementById('contacts-empty-result');
+    if (!table || !search || !filter) return;
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+
+    function apply() {
+        const q = search.value.trim().toLowerCase();
+        const t = filter.value;
+        let visible = 0;
+        rows.forEach(r => {
+            const matchesQ = !q || ['firma','firstname','lastname','email'].some(k => (r.dataset[k] || '').includes(q));
+            const matchesT = !t || r.dataset.art === t;
+            const show = matchesQ && matchesT;
+            r.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        emptyMsg.style.display = visible === 0 ? '' : 'none';
+    }
+    search.addEventListener('input', apply);
+    filter.addEventListener('change', apply);
+})();
+</script>
 {% endblock %}

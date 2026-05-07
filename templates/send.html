@@ -5,7 +5,7 @@
 <div class="page-header">
     <div>
         <h1>Send</h1>
-        <div class="subtitle">Preview, then send to all contacts of a type.</div>
+        <div class="subtitle">Preview, then send to all contacts of a type. The right template variant is picked per contact.</div>
     </div>
 </div>
 
@@ -35,14 +35,21 @@
                 <h2><span class="tag">{{ selected }}</span></h2>
             </div>
 
-            {% if not signed_in %}
+            {% if not ms_accounts %}
                 <div class="banner warn">
-                    <span>Not connected to Microsoft.</span>
+                    <span>No Microsoft account connected.</span>
                     <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">Connect now</a>
                 </div>
             {% endif %}
 
-            {% if not template %}
+            {% if missing_variants %}
+                <div class="banner warn">
+                    <span>Missing template variant: {{ missing_variants|join(', ') }}. The other variant will be used as fallback.</span>
+                    <a class="btn btn-ghost btn-sm" href="{{ url_for('templates_view', art=selected, variant=missing_variants[0]) }}">Create</a>
+                </div>
+            {% endif %}
+
+            {% if not has_template %}
                 <div class="empty">
                     <p>No template for "{{ selected }}".</p>
                     <a class="btn btn-primary" href="{{ url_for('templates_view', art=selected) }}">Create template</a>
@@ -57,18 +64,29 @@
                     <div class="stat"><span class="stat-label">Already sent</span><span class="stat-value dim">{{ already_count }}</span></div>
                 </div>
 
-                {% if signed_in %}
-                <div class="send-actions">
+                {% if ms_accounts %}
+                <div class="send-actions" style="align-items:flex-end; gap:14px">
+                    {% if ms_accounts|length > 1 %}
+                    <label style="display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.07em; font-weight:500">
+                        Send from
+                        <select id="account-picker" style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:9px 12px; border-radius:6px; font-size:13.5px; min-width:220px; text-transform:none; letter-spacing:normal; font-weight:400">
+                            {% for a in ms_accounts %}<option value="{{ a.username }}">{{ a.username }}</option>{% endfor %}
+                        </select>
+                    </label>
+                    {% endif %}
+
                     {% if new_count > 0 %}
-                    <form action="{{ url_for('send_run') }}" method="post" onsubmit="return confirm('Send {{ new_count }} new email{{ '' if new_count == 1 else 's' }}?');">
+                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Send {{ new_count }} new email{{ '' if new_count == 1 else 's' }}?');">
                         <input type="hidden" name="art" value="{{ selected }}">
                         <input type="hidden" name="mode" value="new">
+                        <input type="hidden" name="account" value="">
                         <button class="btn btn-primary" type="submit">Send to {{ new_count }} new</button>
                     </form>
                     {% endif %}
-                    <form action="{{ url_for('send_run') }}" method="post" onsubmit="return confirm('Re-send to ALL {{ total_count }} recipient{{ '' if total_count == 1 else 's' }} (including duplicates)?');">
+                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Re-send to ALL {{ total_count }} recipient{{ '' if total_count == 1 else 's' }} (including duplicates)?');">
                         <input type="hidden" name="art" value="{{ selected }}">
                         <input type="hidden" name="mode" value="all">
+                        <input type="hidden" name="account" value="">
                         <button class="btn btn-ghost" type="submit">Send to all {{ total_count }}</button>
                     </form>
                 </div>
@@ -80,9 +98,12 @@
                     <details class="preview {% if p.already_sent %}sent{% endif %}">
                         <summary>
                             <span>
-                                <strong>{{ p.contact.firma }}</strong>
-                                &middot; {{ p.contact.first_name }} {{ p.contact.last_name }}
-                                {% if p.already_sent %}<span class="badge dim" style="margin-left:8px">already sent</span>{% endif %}
+                                <strong>{{ p.contact.firma or '—' }}</strong>
+                                {% if p.contact.first_name or p.contact.last_name %}
+                                    &middot; {{ p.contact.first_name }} {{ p.contact.last_name }}
+                                {% endif %}
+                                <span class="badge dim" style="margin-left:8px">{{ p.template_variant }}</span>
+                                {% if p.already_sent %}<span class="badge dim" style="margin-left:6px">already sent</span>{% endif %}
                             </span>
                             <span class="mono muted">{{ p.contact.email }}</span>
                         </summary>
@@ -125,4 +146,20 @@
 </div>
 {% endif %}
 
+{% endblock %}
+{% block scripts %}
+<script>
+(function() {
+    const picker = document.getElementById('account-picker');
+    const forms = document.querySelectorAll('.send-form');
+    function syncAccount() {
+        const v = picker ? picker.value : '';
+        forms.forEach(f => {
+            const inp = f.querySelector('input[name=account]');
+            if (inp) inp.value = v;
+        });
+    }
+    if (picker) { picker.addEventListener('change', syncAccount); syncAccount(); }
+})();
+</script>
 {% endblock %}

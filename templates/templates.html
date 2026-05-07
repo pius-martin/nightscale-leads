@@ -8,7 +8,7 @@
 <div class="page-header">
     <div>
         <h1>Templates</h1>
-        <div class="subtitle">One email template per type. Use placeholders to personalize.</div>
+        <div class="subtitle">Two templates per type: <strong>Personal</strong> when you have the contact's name, <strong>Anonymous</strong> for company-only contacts.</div>
     </div>
 </div>
 
@@ -26,28 +26,48 @@
         <ul class="sidebar-list">
             {% for a in arten %}
             <li>
-                <a href="{{ url_for('templates_view', art=a) }}" class="{% if a == selected %}active{% endif %}">{{ a }}</a>
+                <a href="{{ url_for('templates_view', art=a, variant=variant) }}" class="{% if a == selected %}active{% endif %}">{{ a }}</a>
             </li>
             {% endfor %}
         </ul>
     </aside>
 
     <div class="card">
-        <div class="card-header">
-            <h2>{% if current %}Editing{% else %}New template for{% endif %} <span class="tag">{{ selected }}</span></h2>
+        <div class="card-header" style="border-bottom:none; padding-bottom:0; margin-bottom:0">
+            <h2>Editing <span class="tag">{{ selected }}</span></h2>
             {% if current %}
-            <form action="{{ url_for('delete_template', tid=current.id) }}" method="post" onsubmit="return confirm('Delete this template?')" style="display:inline">
-                <button class="btn btn-danger btn-sm" type="submit">Delete template</button>
+            <form action="{{ url_for('delete_template', tid=current.id) }}" method="post" onsubmit="return confirm('Delete this template variant?')" style="display:inline">
+                <button class="btn btn-danger btn-sm" type="submit">Delete variant</button>
             </form>
             {% endif %}
         </div>
+
+        <div class="tab-bar">
+            {% for v in variants %}
+            <a class="tab {% if v == variant %}active{% endif %}" href="{{ url_for('templates_view', art=selected, variant=v) }}">
+                {{ 'Personal' if v == 'personal' else 'Anonymous' }}
+                {% if v in variants_for_art %}<span class="tab-dot"></span>{% endif %}
+            </a>
+            {% endfor %}
+        </div>
+
+        <p class="muted" style="margin:14px 0 22px; font-size:13px">
+            {% if variant == 'personal' %}
+                Used for contacts <strong>with</strong> a first or last name. Use placeholders like {{ '{{first_name}}' }}.
+            {% else %}
+                Used for contacts <strong>without</strong> a person name (company-only). Avoid name placeholders here.
+            {% endif %}
+        </p>
+
         <form method="post" class="form" id="tpl-form">
             <input type="hidden" name="art" value="{{ selected }}">
+            <input type="hidden" name="variant" value="{{ variant }}">
             <label>Subject
-                <input type="text" name="subject" value="{{ current.subject if current else '' }}" placeholder="Hi {{ '{{name}}' }}, quick note on {{ '{{firma}}' }}" required>
+                <input type="text" name="subject" value="{{ current.subject if current else '' }}"
+                       placeholder="{% if variant == 'personal' %}Hi {{ '{{first_name}}' }}, quick note on {{ '{{firma}}' }}{% else %}Quick note for {{ '{{firma}}' }}{% endif %}" required>
             </label>
             <label>Body
-                <span class="hint">Placeholders: {{ '{{firma}}' }} {{ '{{name}}' }} {{ '{{email}}' }} {{ '{{art}}' }}</span>
+                <span class="hint">Placeholders: {{ '{{firma}}' }} {{ '{{first_name}}' }} {{ '{{last_name}}' }} {{ '{{name}}' }} {{ '{{email}}' }} {{ '{{art}}' }}</span>
             </label>
             <div id="editor-toolbar">
                 <span class="ql-formats">
@@ -75,7 +95,7 @@
             <textarea name="body" id="body-input" hidden>{{ current.body if current else '' }}</textarea>
 
             <label style="margin-top:8px">Footer
-                <span class="hint">Optional. Appended below the body — e.g. context, disclaimers, links specific to this template.</span>
+                <span class="hint">Optional. Appended below the body — disclaimers, legal notes, links specific to this template.</span>
             </label>
             <div id="footer-toolbar">
                 <span class="ql-formats">
@@ -113,7 +133,7 @@ const initialFooter = {{ (current.footer if current else '') | tojson }};
 const bodyQuill = new Quill('#editor', {
     theme: 'snow',
     modules: { toolbar: '#editor-toolbar' },
-    placeholder: 'Hi {{ "{{name}}" }}, ...'
+    placeholder: 'Hi {{ "{{first_name}}" }}, ...'
 });
 if (initialBody) {
     if (initialBody.trim().startsWith('<')) bodyQuill.clipboard.dangerouslyPasteHTML(initialBody);

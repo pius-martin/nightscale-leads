@@ -490,6 +490,39 @@ p { margin: 0 0 12px; }
     .contact-row { grid-template-columns: 1fr; gap: 4px; padding: 14px 18px; }
 }
 
+/* Tab bar (Templates page variants) */
+.tab-bar {
+    display: flex;
+    gap: 2px;
+    padding: 4px;
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    margin-top: 18px;
+    width: fit-content;
+}
+.tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    border-radius: 5px;
+    color: var(--text-dim);
+    font-size: 13px;
+    font-weight: 500;
+    transition: all 0.1s;
+    text-decoration: none;
+}
+.tab:hover { color: var(--text); }
+.tab.active { background: var(--bg-card); color: var(--text); box-shadow: inset 0 0 0 1px var(--border); }
+.tab-dot {
+    display: inline-block;
+    width: 6px;
+    height: 6px;
+    border-radius: 50%;
+    background: var(--ok);
+}
+
 /* Send: contact already-sent indicator */
 .preview.sent summary { opacity: 0.55; }
 .send-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }

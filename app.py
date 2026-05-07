@@ -1,4 +1,6 @@
+import csv
 import hmac
+import io
 import os
 import re
 import threading
@@ -101,12 +103,18 @@ def gate():
 @app.context_processor
 def inject_globals():
     try:
-        signed_in = graph_mail.is_signed_in()
-        account = graph_mail.signed_in_account()
+        accounts = graph_mail.list_accounts()
+        signed_in = bool(accounts)
+        account = accounts[0]["username"] if accounts else None
         settings = db.all_settings() if _db_ready["ok"] else {}
     except Exception:
-        signed_in, account, settings = False, None, {}
-    return {"signed_in": signed_in, "account": account, "settings": settings}
+        accounts, signed_in, account, settings = [], False, None, {}
+    return {
+        "signed_in": signed_in,
+        "account": account,
+        "ms_accounts": accounts,
+        "settings": settings,
+    }
 
 
 def render_template_text(text: str, contact: dict) -> str:
@@ -149,6 +157,100 @@ def index():
     return redirect(url_for("contacts"))
 
 
+_HEADER_ALIASES = {
+    "firma": {"firma", "company", "firmenname", "organization", "organisation"},
+    "first_name": {"first_name", "firstname", "first", "vorname"},
+    "last_name": {"last_name", "lastname", "last", "nachname", "surname"},
+    "email": {"email", "e-mail", "mail", "e_mail"},
+    "art": {"art", "type", "typ", "category", "kategorie", "tag"},
+    "notes": {"notes", "notizen", "note", "comment", "kommentar"},
+}
+
+
+def _normalize_header(h: str) -> str:
+    h = (h or "").strip().lower().replace("-", "_").replace(" ", "_")
+    for canonical, aliases in _HEADER_ALIASES.items():
+        if h in aliases:
+            return canonical
+    return ""
+
+
+def _parse_csv(stream) -> list[dict]:
+    text = stream.read()
+    if isinstance(text, bytes):
+        for enc in ("utf-8-sig", "utf-8", "latin-1"):
+            try:
+                text = text.decode(enc)
+                break
+            except UnicodeDecodeError:
+                continue
+    # Detect delimiter (comma or semicolon)
+    sniffer = csv.Sniffer()
+    sample = text[:2048]
+    try:
+        dialect = sniffer.sniff(sample, delimiters=",;\t")
+    except csv.Error:
+        dialect = csv.excel
+    reader = csv.DictReader(io.StringIO(text), dialect=dialect)
+    rows = []
+    for raw in reader:
+        rows.append({_normalize_header(k): (v or "").strip() for k, v in raw.items() if k})
+    return rows
+
+
+def _parse_xlsx(file_storage) -> list[dict]:
+    from openpyxl import load_workbook
+    wb = load_workbook(filename=file_storage, read_only=True, data_only=True)
+    ws = wb.active
+    rows_iter = ws.iter_rows(values_only=True)
+    try:
+        header_row = next(rows_iter)
+    except StopIteration:
+        return []
+    headers = [_normalize_header(str(h or "")) for h in header_row]
+    rows = []
+    for r in rows_iter:
+        d = {h: (str(v).strip() if v is not None else "") for h, v in zip(headers, r) if h}
+        if any(d.values()):
+            rows.append(d)
+    return rows
+
+
+def _import_rows(rows: list[dict]) -> tuple[int, int, list[str]]:
+    """Insert valid rows. Returns (added, skipped, error messages)."""
+    added, skipped, errors = 0, 0, []
+    existing_arten = set(db.list_arten())
+    for i, r in enumerate(rows, start=2):  # row 1 is the header
+        email = r.get("email", "").strip()
+        firma = r.get("firma", "").strip()
+        art = r.get("art", "").strip()
+        if not email:
+            skipped += 1
+            errors.append(f"row {i}: missing email")
+            continue
+        if not art:
+            skipped += 1
+            errors.append(f"row {i}: missing type")
+            continue
+        if not firma and not r.get("first_name") and not r.get("last_name"):
+            skipped += 1
+            errors.append(f"row {i}: needs at least company or a name")
+            continue
+        if art not in existing_arten:
+            db.add_art(art)
+            existing_arten.add(art)
+        db.add_contact(
+            firma=firma,
+            first_name=r.get("first_name", ""),
+            last_name=r.get("last_name", ""),
+            email=email,
+            art=art,
+            notes=r.get("notes", ""),
+        )
+        added += 1
+    return added, skipped, errors
+
+
 # ---------- Contacts ----------
 @app.route("/contacts", methods=["GET", "POST"])
 def contacts():
@@ -157,10 +259,16 @@ def contacts():
         art = request.form.get("art", "").strip()
         if art and art not in arten:
             db.add_art(art)
+        firma = request.form.get("firma", "").strip()
+        first_name = request.form.get("first_name", "").strip()
+        last_name = request.form.get("last_name", "").strip()
+        if not firma and not first_name and not last_name:
+            flash("Provide at least a company or a name.", "error")
+            return redirect(url_for("contacts"))
         db.add_contact(
-            firma=request.form.get("firma", ""),
-            first_name=request.form.get("first_name", ""),
-            last_name=request.form.get("last_name", ""),
+            firma=firma,
+            first_name=first_name,
+            last_name=last_name,
             email=request.form.get("email", ""),
             art=art,
             notes=request.form.get("notes", ""),
@@ -168,6 +276,34 @@ def contacts():
         return redirect(url_for("contacts"))
     items = db.list_contacts()
     return render_template("contacts.html", contacts=items, arten=arten)
+
+
+@app.route("/contacts/import", methods=["POST"])
+def contacts_import():
+    file = request.files.get("file")
+    if not file or not file.filename:
+        flash("No file selected.", "error")
+        return redirect(url_for("contacts"))
+    name = file.filename.lower()
+    try:
+        if name.endswith(".csv"):
+            rows = _parse_csv(file.stream)
+        elif name.endswith((".xlsx", ".xlsm")):
+            rows = _parse_xlsx(file)
+        else:
+            flash("Unsupported file type. Use .csv or .xlsx.", "error")
+            return redirect(url_for("contacts"))
+    except Exception as e:
+        flash(f"Could not parse file: {e}", "error")
+        return redirect(url_for("contacts"))
+    added, skipped, errors = _import_rows(rows)
+    msg = f"Imported {added} contact{'' if added == 1 else 's'}"
+    if skipped:
+        msg += f", skipped {skipped}"
+        if errors:
+            msg += " (" + "; ".join(errors[:3]) + ("…" if len(errors) > 3 else "") + ")"
+    flash(msg + ".", "success" if skipped == 0 else "error")
+    return redirect(url_for("contacts"))
 
 
 @app.route("/contacts/<int:cid>/edit", methods=["GET", "POST"])
@@ -226,21 +362,31 @@ def templates_view():
     arten = db.list_arten()
     if request.method == "POST":
         art = request.form.get("art", "").strip()
+        variant = request.form.get("variant", "personal").strip()
+        if variant not in db.VARIANTS:
+            variant = "personal"
         subject = request.form.get("subject", "")
         body = request.form.get("body", "")
         footer = request.form.get("footer", "")
         if art:
             if art not in arten:
                 db.add_art(art)
-            db.upsert_template(art, subject, body, footer)
-        return redirect(url_for("templates_view", art=art))
+            db.upsert_template(art, variant, subject, body, footer)
+        return redirect(url_for("templates_view", art=art, variant=variant))
 
     selected = request.args.get("art") or (arten[0] if arten else "")
-    current = db.get_template_by_art(selected) if selected else None
+    variant = request.args.get("variant", "personal")
+    if variant not in db.VARIANTS:
+        variant = "personal"
+    variants_for_art = db.get_templates_for_art(selected) if selected else {}
+    current = variants_for_art.get(variant)
     return render_template(
         "templates.html",
         arten=arten,
         selected=selected,
+        variant=variant,
+        variants=list(db.VARIANTS),
+        variants_for_art=variants_for_art,
         current=current,
     )
 
@@ -252,51 +398,76 @@ def delete_template(tid):
 
 
 def _to_html(text: str) -> str:
+    """Convert content to HTML. If it already contains tags, leave as-is.
+    Plain text: split into paragraphs on blank lines, single newlines as <br>."""
     if not text:
         return ""
-    return text if "<" in text and ">" in text else text.replace("\n", "<br>")
+    if "<" in text and ">" in text:
+        return text
+    paragraphs = [p.strip() for p in text.split("\n\n") if p.strip()]
+    return "".join("<p>" + p.replace("\n", "<br>") + "</p>" for p in paragraphs)
 
 
 def _compose_body(template_body: str, template_footer: str, signature: str, contact: dict) -> str:
-    body_html = _to_html(render_template_text(template_body, contact))
-    footer_html = _to_html(render_template_text(template_footer or "", contact))
-    sig_html = _to_html(render_template_text(signature or "", contact))
-    parts = [p for p in (body_html, footer_html, sig_html) if p]
-    return "<br><br>".join(parts)
+    """Stitch body + footer + signature into one HTML body. Each section is
+    already block-level (Quill <p> tags or plain text wrapped in <p>), so we
+    concatenate without adding extra <br><br> which caused doubled spacing."""
+    parts = []
+    for raw in (template_body, template_footer, signature):
+        rendered = render_template_text(raw or "", contact)
+        html = _to_html(rendered)
+        if html:
+            parts.append(html)
+    return "".join(parts)
 
 
 # ---------- Send ----------
+def _contact_variant(c: dict) -> str:
+    has_name = bool((c.get("first_name") or "").strip() or (c.get("last_name") or "").strip())
+    return "personal" if has_name else "anonymous"
+
+
 @app.route("/send", methods=["GET"])
 def send_view():
     arten = db.list_arten()
     selected = request.args.get("art") or (arten[0] if arten else "")
-    template = db.get_template_by_art(selected) if selected else None
+    variants_for_art = db.get_templates_for_art(selected) if selected else {}
     contacts_for_art = db.list_contacts(art=selected) if selected else []
     already = db.sent_contact_ids(selected) if selected else set()
     signature = db.get_setting("email_signature", "")
 
     previews = []
     new_count = 0
-    if template and contacts_for_art:
-        for c in contacts_for_art:
-            sent_before = c["id"] in already
-            if not sent_before:
-                new_count += 1
-            previews.append({
-                "contact": c,
-                "subject": render_template_text(template["subject"], c),
-                "body": _compose_body(template["body"], template.get("footer", ""), signature, c),
-                "already_sent": sent_before,
-            })
+    missing_variants = set()
+    for c in contacts_for_art:
+        variant = _contact_variant(c)
+        template = variants_for_art.get(variant) or variants_for_art.get(
+            "personal" if variant == "anonymous" else "anonymous"
+        )
+        if not template:
+            missing_variants.add(variant)
+            continue
+        sent_before = c["id"] in already
+        if not sent_before:
+            new_count += 1
+        previews.append({
+            "contact": c,
+            "variant": variant,
+            "template_variant": template["variant"],
+            "subject": render_template_text(template["subject"], c),
+            "body": _compose_body(template["body"], template.get("footer", ""), signature, c),
+            "already_sent": sent_before,
+        })
     log = db.list_log(50)
     return render_template(
         "send.html",
         arten=arten,
         selected=selected,
-        template=template,
+        has_template=bool(variants_for_art),
         previews=previews,
         new_count=new_count,
         total_count=len(previews),
+        missing_variants=sorted(missing_variants),
         log=log,
     )
 
@@ -305,15 +476,16 @@ def send_view():
 def send_run():
     art = request.form.get("art", "").strip()
     mode = request.form.get("mode", "new")  # 'new' or 'all'
+    account = request.form.get("account", "").strip() or None
     if not art:
         flash("No type selected.", "error")
         return redirect(url_for("send_view"))
-    if not graph_mail.is_signed_in():
-        flash("Not connected to Microsoft.", "error")
+    if not graph_mail.list_accounts():
+        flash("No Microsoft account connected.", "error")
         return redirect(url_for("auth_view"))
 
-    template = db.get_template_by_art(art)
-    if not template:
+    variants_for_art = db.get_templates_for_art(art)
+    if not variants_for_art:
         flash("No template for this type.", "error")
         return redirect(url_for("send_view", art=art))
 
@@ -327,6 +499,14 @@ def send_run():
         if mode == "new" and c["id"] in already:
             skipped += 1
             continue
+        variant = _contact_variant(c)
+        template = variants_for_art.get(variant) or variants_for_art.get(
+            "personal" if variant == "anonymous" else "anonymous"
+        )
+        if not template:
+            failed += 1
+            db.log_send(c["id"], c["email"], art, "", "failed", f"no template for variant {variant}")
+            continue
         subject = render_template_text(template["subject"], c)
         body_html = _compose_body(template["body"], template.get("footer", ""), signature, c)
         try:
@@ -336,6 +516,7 @@ def send_run():
                 body_html,
                 sender_name=sender_name or None,
                 sender_email=sender_email or None,
+                account=account,
             )
             db.log_send(c["id"], c["email"], art, subject, "sent")
             sent += 1
@@ -390,7 +571,10 @@ def auth_status():
 
 @app.route("/auth/signout", methods=["POST"])
 def auth_signout():
-    graph_mail.sign_out()
+    username = request.form.get("username", "").strip() or None
+    graph_mail.sign_out(username)
+    if request.form.get("from") == "settings":
+        return redirect(url_for("settings_view"))
     return redirect(url_for("auth_view"))
 
 
