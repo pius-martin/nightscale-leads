@@ -433,11 +433,10 @@ def _to_html(text: str) -> str:
 
 
 def _compose_body(template_body: str, template_footer: str, signature: str, contact: dict) -> str:
-    """Stitch body + footer + signature into one HTML body. Each section is
-    already block-level (Quill <p> tags or plain text wrapped in <p>), so we
-    concatenate without adding extra <br><br> which caused doubled spacing.
-    Substituted variables are wrapped in a span with explicit inherited
-    styling so clients don't tint them."""
+    """Stitch body + footer + signature into one HTML body. Each <p> from
+    Quill represents one Enter press and should render as a line break, not
+    a full paragraph break. Empty paragraphs (Enter twice) keep their
+    line-height and become the only place a real blank line appears."""
     parts = []
     for raw in (template_body, template_footer, signature):
         rendered = render_template_text(raw or "", contact, html_safe=True)
@@ -477,8 +476,12 @@ EMAIL_HTML_TEMPLATE = """<!DOCTYPE html>
     font-size: 14px;
     line-height: 1.5;
   }}
-  p {{ margin: 0 0 0.85em; color: #000000; }}
-  p:empty {{ margin: 0 0 0.85em; min-height: 1em; }}
+  /* Each Enter in the editor becomes a <p>; render as a line break.
+     A real blank line only appears when the writer pressed Enter twice,
+     which Quill stores as an empty <p><br></p> — its line-height is the gap. */
+  p {{ margin: 0 !important; color: #000000; }}
+  p:empty {{ margin: 0 !important; min-height: 1em; }}
+  br {{ line-height: 1.5; }}
   a {{ color: #0a66c2; }}
   strong, b {{ font-weight: 600; color: inherit; }}
   em, i {{ color: inherit; }}
