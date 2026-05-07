@@ -1,0 +1,70 @@
+{% extends "base.html" %}
+{% block title %}Kontakte · Nightscale Leads{% endblock %}
+{% block content %}
+
+<section class="grid two">
+    <div class="card">
+        <h2>Neuer Kontakt</h2>
+        <form method="post" class="form">
+            <label>Firma
+                <input type="text" name="firma" required autocomplete="off">
+            </label>
+            <label>Name
+                <input type="text" name="name" required autocomplete="off">
+            </label>
+            <label>E-Mail
+                <input type="email" name="email" required autocomplete="off">
+            </label>
+            <label>Art
+                <input type="text" name="art" list="arten-list" required autocomplete="off" placeholder="z.B. Investor, Partner, Lead">
+                <datalist id="arten-list">
+                    {% for a in arten %}<option value="{{ a }}">{% endfor %}
+                </datalist>
+            </label>
+            <label>Notizen
+                <textarea name="notes" rows="2"></textarea>
+            </label>
+            <button type="submit" class="btn btn-primary">Hinzufügen</button>
+        </form>
+    </div>
+
+    <div class="card">
+        <div class="card-header">
+            <h2>Alle Kontakte</h2>
+            <span class="muted">{{ contacts|length }}</span>
+        </div>
+        {% if contacts %}
+        <table class="table">
+            <thead>
+                <tr>
+                    <th>Firma</th>
+                    <th>Name</th>
+                    <th>E-Mail</th>
+                    <th>Art</th>
+                    <th></th>
+                </tr>
+            </thead>
+            <tbody>
+                {% for c in contacts %}
+                <tr>
+                    <td>{{ c.firma }}</td>
+                    <td>{{ c.name }}</td>
+                    <td class="mono">{{ c.email }}</td>
+                    <td><span class="tag">{{ c.art }}</span></td>
+                    <td class="actions">
+                        <a class="btn btn-ghost btn-sm" href="{{ url_for('edit_contact', cid=c.id) }}">Bearbeiten</a>
+                        <form action="{{ url_for('delete_contact', cid=c.id) }}" method="post" onsubmit="return confirm('Kontakt löschen?')" style="display:inline">
+                            <button class="btn btn-danger btn-sm" type="submit">Löschen</button>
+                        </form>
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        {% else %}
+            <p class="muted">Noch keine Kontakte.</p>
+        {% endif %}
+    </div>
+</section>
+
+{% endblock %}

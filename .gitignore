@@ -1,0 +1,9 @@
+.env
+*.pyc
+__pycache__/
+.venv/
+venv/
+instance/
+data.db
+token_cache.bin
+.DS_Store

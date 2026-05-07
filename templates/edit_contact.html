@@ -1,0 +1,31 @@
+{% extends "base.html" %}
+{% block title %}Kontakt bearbeiten{% endblock %}
+{% block content %}
+<section class="card max-narrow">
+    <h2>Kontakt bearbeiten</h2>
+    <form method="post" class="form">
+        <label>Firma
+            <input type="text" name="firma" value="{{ contact.firma }}" required>
+        </label>
+        <label>Name
+            <input type="text" name="name" value="{{ contact.name }}" required>
+        </label>
+        <label>E-Mail
+            <input type="email" name="email" value="{{ contact.email }}" required>
+        </label>
+        <label>Art
+            <input type="text" name="art" list="arten-list" value="{{ contact.art }}" required>
+            <datalist id="arten-list">
+                {% for a in arten %}<option value="{{ a }}">{% endfor %}
+            </datalist>
+        </label>
+        <label>Notizen
+            <textarea name="notes" rows="3">{{ contact.notes }}</textarea>
+        </label>
+        <div class="row">
+            <button class="btn btn-primary" type="submit">Speichern</button>
+            <a class="btn btn-ghost" href="{{ url_for('contacts') }}">Abbrechen</a>
+        </div>
+    </form>
+</section>
+{% endblock %}

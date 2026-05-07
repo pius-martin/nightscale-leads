@@ -1,0 +1,96 @@
+{% extends "base.html" %}
+{% block title %}Templates · Nightscale Leads{% endblock %}
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
+{% endblock %}
+{% block content %}
+
+<section class="grid sidebar">
+    <aside class="card">
+        <h2>Arten</h2>
+        {% if arten %}
+        <ul class="sidebar-list">
+            {% for a in arten %}
+            <li>
+                <a href="{{ url_for('templates_view', art=a) }}" class="{% if a == selected %}active{% endif %}">
+                    {{ a }}
+                </a>
+            </li>
+            {% endfor %}
+        </ul>
+        {% else %}
+        <p class="muted">Noch keine Arten. Lege erst einen Kontakt an.</p>
+        {% endif %}
+    </aside>
+
+    <div class="card">
+        <h2>Template{% if selected %} · <span class="tag">{{ selected }}</span>{% endif %}</h2>
+        <form method="post" class="form" id="tpl-form">
+            <label>Art
+                <input type="text" name="art" value="{{ selected }}" placeholder="z.B. Investor" required>
+            </label>
+            <label>Betreff
+                <input type="text" name="subject" value="{{ current.subject if current else '' }}" placeholder="Hi {{ '{{name}}' }}, kurz zu {{ '{{firma}}' }}" required>
+            </label>
+            <label>Inhalt
+                <span class="muted" style="text-transform:none;letter-spacing:normal;font-weight:normal">
+                    Platzhalter: {{ '{{firma}}' }} {{ '{{name}}' }} {{ '{{email}}' }} {{ '{{art}}' }}
+                </span>
+            </label>
+            <div id="editor-toolbar">
+                <span class="ql-formats">
+                    <select class="ql-header"><option value="1"></option><option value="2"></option><option selected></option></select>
+                </span>
+                <span class="ql-formats">
+                    <button class="ql-bold"></button>
+                    <button class="ql-italic"></button>
+                    <button class="ql-underline"></button>
+                    <button class="ql-strike"></button>
+                </span>
+                <span class="ql-formats">
+                    <button class="ql-list" value="ordered"></button>
+                    <button class="ql-list" value="bullet"></button>
+                </span>
+                <span class="ql-formats">
+                    <button class="ql-link"></button>
+                    <button class="ql-blockquote"></button>
+                </span>
+                <span class="ql-formats">
+                    <button class="ql-clean"></button>
+                </span>
+            </div>
+            <div id="editor"></div>
+            <textarea name="body" id="body-input" hidden>{{ current.body if current else '' }}</textarea>
+
+            <div class="row mt">
+                <button type="submit" class="btn btn-primary">Speichern</button>
+                {% if current %}
+                <button type="button" class="btn btn-ghost" onclick="document.getElementById('del-form').submit()">Löschen</button>
+                {% endif %}
+            </div>
+        </form>
+        {% if current %}
+        <form id="del-form" action="{{ url_for('delete_template', tid=current.id) }}" method="post" onsubmit="return confirm('Template löschen?')" style="display:none"></form>
+        {% endif %}
+    </div>
+</section>
+
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+<script>
+const initial = {{ (current.body if current else '') | tojson }};
+const quill = new Quill('#editor', {
+    theme: 'snow',
+    modules: { toolbar: '#editor-toolbar' },
+    placeholder: 'Hi {{ "{{name}}" }}, ...'
+});
+if (initial) {
+    if (initial.trim().startsWith('<')) quill.clipboard.dangerouslyPasteHTML(initial);
+    else quill.setText(initial);
+}
+document.getElementById('tpl-form').addEventListener('submit', () => {
+    document.getElementById('body-input').value = quill.root.innerHTML;
+});
+</script>
+{% endblock %}

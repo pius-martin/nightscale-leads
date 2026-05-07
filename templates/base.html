@@ -1,0 +1,47 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>{% block title %}Nightscale Leads{% endblock %}</title>
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+    {% block head %}{% endblock %}
+</head>
+<body>
+    <header class="topbar">
+        <div class="brand">
+            <span class="dot"></span>
+            <span>nightscale · leads</span>
+        </div>
+        <nav class="nav">
+            <a href="{{ url_for('contacts') }}" class="{% if request.endpoint == 'contacts' or request.endpoint == 'edit_contact' %}active{% endif %}">Kontakte</a>
+            <a href="{{ url_for('templates_view') }}" class="{% if request.endpoint == 'templates_view' %}active{% endif %}">Templates</a>
+            <a href="{{ url_for('send_view') }}" class="{% if request.endpoint == 'send_view' %}active{% endif %}">Versand</a>
+            <a href="{{ url_for('settings_view') }}" class="{% if request.endpoint == 'settings_view' %}active{% endif %}">Einstellungen</a>
+        </nav>
+        <div class="auth-status">
+            {% if signed_in %}
+                <span class="badge ok">● {{ account }}</span>
+                <form action="{{ url_for('auth_signout') }}" method="post" style="display:inline">
+                    <button class="btn btn-ghost btn-sm" type="submit">Abmelden</button>
+                </form>
+            {% else %}
+                <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">Microsoft verbinden</a>
+            {% endif %}
+        </div>
+    </header>
+
+    <main class="container">
+        {% with messages = get_flashed_messages(with_categories=true) %}
+            {% if messages %}
+                {% for cat, msg in messages %}
+                    <div class="flash {{ cat }}">{{ msg }}</div>
+                {% endfor %}
+            {% endif %}
+        {% endwith %}
+        {% block content %}{% endblock %}
+    </main>
+
+    {% block scripts %}{% endblock %}
+</body>
+</html>

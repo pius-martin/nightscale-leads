@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}Microsoft verbinden{% endblock %}
+{% block content %}
+
+<section class="card max-narrow">
+    <h2>Microsoft 365 verbinden</h2>
+    {% if signed_in %}
+        <p>Angemeldet als <strong>{{ account }}</strong>.</p>
+        <form action="{{ url_for('auth_signout') }}" method="post">
+            <button class="btn btn-danger" type="submit">Abmelden</button>
+        </form>
+    {% else %}
+        <p class="muted">Login per Device-Code-Flow. Klick auf „Login starten", öffne den Link, gib den Code ein und melde dich mit deinem Microsoft-Konto an. Der Token wird lokal gespeichert.</p>
+        <button id="start-btn" class="btn btn-primary">Login starten</button>
+
+        <div id="flow-info" class="flow-info" hidden>
+            <div class="kv"><span class="muted">URL</span>
+                <a id="flow-url" href="#" target="_blank" rel="noopener" class="mono">—</a>
+            </div>
+            <div class="kv"><span class="muted">Code</span>
+                <code id="flow-code" class="code-big">—</code>
+                <button id="copy-btn" class="btn btn-ghost btn-sm">Kopieren</button>
+            </div>
+            <p id="flow-status" class="muted">Warte auf Login…</p>
+        </div>
+    {% endif %}
+</section>
+
+{% endblock %}
+{% block scripts %}
+<script>
+const startBtn = document.getElementById('start-btn');
+if (startBtn) {
+    startBtn.addEventListener('click', async () => {
+        startBtn.disabled = true;
+        startBtn.textContent = 'Starte…';
+        const r = await fetch('{{ url_for("auth_start") }}', {method: 'POST'});
+        if (!r.ok) {
+            startBtn.disabled = false;
+            startBtn.textContent = 'Login starten';
+            alert('Fehler beim Starten.');
+            return;
+        }
+        const data = await r.json();
+        document.getElementById('flow-info').hidden = false;
+        const urlEl = document.getElementById('flow-url');
+        urlEl.href = data.verification_uri;
+        urlEl.textContent = data.verification_uri;
+        document.getElementById('flow-code').textContent = data.user_code;
+        window.open(data.verification_uri, '_blank');
+
+        document.getElementById('copy-btn').addEventListener('click', () => {
+            navigator.clipboard.writeText(data.user_code);
+        });
+
+        const status = document.getElementById('flow-status');
+        const poll = setInterval(async () => {
+            const s = await fetch('{{ url_for("auth_status") }}').then(r => r.json());
+            if (s.signed_in) {
+                clearInterval(poll);
+                status.textContent = 'Verbunden mit ' + s.account;
+                setTimeout(() => location.href = '{{ url_for("send_view") }}', 800);
+            }
+        }, 2500);
+    });
+}
+</script>
+{% endblock %}

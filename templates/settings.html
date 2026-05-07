@@ -1,0 +1,22 @@
+{% extends "base.html" %}
+{% block title %}Einstellungen{% endblock %}
+{% block content %}
+
+<section class="card max-narrow">
+    <h2>Einstellungen</h2>
+    <p class="muted">Diese Werte werden für alle ausgehenden E-Mails verwendet.</p>
+    <form method="post" class="form">
+        <label>Absender-Name (Anzeige)
+            <input type="text" name="sender_name" value="{{ settings.get('sender_name', '') }}" placeholder="z.B. Pius Martin · Nightscale">
+        </label>
+        <label>Absender-E-Mail (optional Override)
+            <input type="email" name="sender_email" value="{{ settings.get('sender_email', '') }}" placeholder="pius@nightscale.ai">
+            <small class="muted" style="text-transform:none;letter-spacing:normal">Leer lassen, um das angemeldete Konto zu verwenden. Override funktioniert nur, wenn du Sende-Rechte für diese Adresse hast (Send-As / Shared Mailbox).</small>
+        </label>
+        <div class="row">
+            <button type="submit" class="btn btn-primary">Speichern</button>
+        </div>
+    </form>
+</section>
+
+{% endblock %}
