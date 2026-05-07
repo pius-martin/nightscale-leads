@@ -124,24 +124,27 @@ _PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
 # text, defeating Apple Mail data detectors and other clients that color
 # detected entities (company names, etc.) differently.
 _VAR_STYLE = (
-    "color:inherit !important;background:transparent !important;"
-    "background-color:transparent !important;text-decoration:inherit;"
-    "font:inherit"
+    "color:#000000 !important;"
+    "background:transparent !important;"
+    "background-color:transparent !important;"
+    "text-decoration:none !important;"
+    "font:inherit;"
 )
 
 
 def render_template_text(text: str, contact: dict, html_safe: bool = False) -> str:
     """Replace {{firma}}, {{first_name}}, {{last_name}}, {{name}}, {{email}}, {{art}}.
     Missing fields render as MISSING_MARKER. When html_safe is True, the
-    substituted value is wrapped in a <span> with explicit inherited styling,
-    so Apple Mail and others don't tint detected entities."""
+    substituted value is wrapped in a <span> with explicit black color and
+    x-apple-data-detectors="false" so Apple Mail does NOT auto-style
+    detected entities (company names, etc.) in gray or another tint."""
     def repl(m):
         key = m.group(1).strip().lower()
         value = str(contact.get(key, "") or "").strip()
         if not value:
             value = MISSING_MARKER
         if html_safe:
-            return f'<span style="{_VAR_STYLE}">{value}</span>'
+            return f'<span x-apple-data-detectors="false" style="{_VAR_STYLE}">{value}</span>'
         return value
     return _PLACEHOLDER_RE.sub(repl, text or "")
 
@@ -485,7 +488,7 @@ EMAIL_HTML_TEMPLATE = """<!DOCTYPE html>
   .sig p, .footer p {{ margin: 0; }}
 </style>
 </head>
-<body style="margin:0;padding:16px 18px;background-color:#ffffff;color:#000000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.5;">
+<body x-apple-data-detectors="false" style="margin:0;padding:16px 18px;background-color:#ffffff;color:#000000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.5;">
 {content}
 </body>
 </html>"""
