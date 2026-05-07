@@ -467,23 +467,25 @@ EMAIL_HTML_TEMPLATE = """<!DOCTYPE html>
   body, body * {{ background-color: transparent !important; }}
   body {{
     margin: 0;
-    padding: 0;
+    padding: 16px 18px;
     background-color: #ffffff !important;
     color: #000000;
     font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
     font-size: 14px;
-    line-height: 1.45;
+    line-height: 1.5;
   }}
-  p {{ margin: 0 0 0.25em; color: #000000; }}
-  p:empty {{ margin: 0; min-height: 1em; }}
+  p {{ margin: 0 0 0.85em; color: #000000; }}
+  p:empty {{ margin: 0 0 0.85em; min-height: 1em; }}
   a {{ color: #0a66c2; }}
   strong, b {{ font-weight: 600; color: inherit; }}
   em, i {{ color: inherit; }}
-  ul, ol {{ margin: 0 0 0.5em; padding-left: 22px; }}
-  blockquote {{ margin: 0 0 0.5em; padding-left: 12px; border-left: 2px solid #d0d0d0; color: #555; }}
+  ul, ol {{ margin: 0 0 0.85em; padding-left: 22px; }}
+  blockquote {{ margin: 0 0 0.85em; padding-left: 12px; border-left: 2px solid #d0d0d0; color: #555; }}
+  /* Signature/footer blocks: tighten consecutive single-line paragraphs */
+  .sig p, .footer p {{ margin: 0; }}
 </style>
 </head>
-<body style="margin:0;padding:0;background-color:#ffffff;color:#000000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.45;">
+<body style="margin:0;padding:16px 18px;background-color:#ffffff;color:#000000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.5;">
 {content}
 </body>
 </html>"""
