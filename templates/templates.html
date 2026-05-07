@@ -74,6 +74,26 @@
             <div id="editor"></div>
             <textarea name="body" id="body-input" hidden>{{ current.body if current else '' }}</textarea>
 
+            <label style="margin-top:8px">Footer
+                <span class="hint">Optional. Appended below the body — e.g. context, disclaimers, links specific to this template.</span>
+            </label>
+            <div id="footer-toolbar">
+                <span class="ql-formats">
+                    <button class="ql-bold"></button>
+                    <button class="ql-italic"></button>
+                    <button class="ql-underline"></button>
+                </span>
+                <span class="ql-formats">
+                    <button class="ql-list" value="bullet"></button>
+                    <button class="ql-link"></button>
+                </span>
+                <span class="ql-formats">
+                    <button class="ql-clean"></button>
+                </span>
+            </div>
+            <div id="footer-editor"></div>
+            <textarea name="footer" id="footer-input" hidden>{{ current.footer if current else '' }}</textarea>
+
             <div class="row">
                 <button type="submit" class="btn btn-primary">Save template</button>
             </div>
@@ -87,18 +107,32 @@
 {% if arten %}
 <script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
 <script>
-const initial = {{ (current.body if current else '') | tojson }};
-const quill = new Quill('#editor', {
+const initialBody = {{ (current.body if current else '') | tojson }};
+const initialFooter = {{ (current.footer if current else '') | tojson }};
+
+const bodyQuill = new Quill('#editor', {
     theme: 'snow',
     modules: { toolbar: '#editor-toolbar' },
     placeholder: 'Hi {{ "{{name}}" }}, ...'
 });
-if (initial) {
-    if (initial.trim().startsWith('<')) quill.clipboard.dangerouslyPasteHTML(initial);
-    else quill.setText(initial);
+if (initialBody) {
+    if (initialBody.trim().startsWith('<')) bodyQuill.clipboard.dangerouslyPasteHTML(initialBody);
+    else bodyQuill.setText(initialBody);
 }
+
+const footerQuill = new Quill('#footer-editor', {
+    theme: 'snow',
+    modules: { toolbar: '#footer-toolbar' },
+    placeholder: 'Optional footer (legal note, links, ...)'
+});
+if (initialFooter) {
+    if (initialFooter.trim().startsWith('<')) footerQuill.clipboard.dangerouslyPasteHTML(initialFooter);
+    else footerQuill.setText(initialFooter);
+}
+
 document.getElementById('tpl-form').addEventListener('submit', () => {
-    document.getElementById('body-input').value = quill.root.innerHTML;
+    document.getElementById('body-input').value = bodyQuill.root.innerHTML;
+    document.getElementById('footer-input').value = (footerQuill.getText().trim() === '') ? '' : footerQuill.root.innerHTML;
 });
 </script>
 {% endif %}

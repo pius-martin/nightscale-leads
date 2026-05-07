@@ -210,10 +210,11 @@ def templates_view():
         art = request.form.get("art", "").strip()
         subject = request.form.get("subject", "")
         body = request.form.get("body", "")
+        footer = request.form.get("footer", "")
         if art:
             if art not in arten:
                 db.add_art(art)
-            db.upsert_template(art, subject, body)
+            db.upsert_template(art, subject, body, footer)
         return redirect(url_for("templates_view", art=art))
 
     selected = request.args.get("art") or (arten[0] if arten else "")
@@ -232,14 +233,18 @@ def delete_template(tid):
     return redirect(url_for("templates_view"))
 
 
-def _compose_body(template_body: str, signature: str, contact: dict) -> str:
-    body = render_template_text(template_body, contact)
-    sig = render_template_text(signature, contact) if signature else ""
-    if sig:
-        sig_html = sig if "<" in sig and ">" in sig else sig.replace("\n", "<br>")
-        body_html_main = body if "<" in body and ">" in body else body.replace("\n", "<br>")
-        return f"{body_html_main}<br><br>{sig_html}"
-    return body if "<" in body and ">" in body else body.replace("\n", "<br>")
+def _to_html(text: str) -> str:
+    if not text:
+        return ""
+    return text if "<" in text and ">" in text else text.replace("\n", "<br>")
+
+
+def _compose_body(template_body: str, template_footer: str, signature: str, contact: dict) -> str:
+    body_html = _to_html(render_template_text(template_body, contact))
+    footer_html = _to_html(render_template_text(template_footer or "", contact))
+    sig_html = _to_html(render_template_text(signature or "", contact))
+    parts = [p for p in (body_html, footer_html, sig_html) if p]
+    return "<br><br>".join(parts)
 
 
 # ---------- Send ----------
@@ -262,7 +267,7 @@ def send_view():
             previews.append({
                 "contact": c,
                 "subject": render_template_text(template["subject"], c),
-                "body": _compose_body(template["body"], signature, c),
+                "body": _compose_body(template["body"], template.get("footer", ""), signature, c),
                 "already_sent": sent_before,
             })
     log = db.list_log(50)
@@ -305,7 +310,7 @@ def send_run():
             skipped += 1
             continue
         subject = render_template_text(template["subject"], c)
-        body_html = _compose_body(template["body"], signature, c)
+        body_html = _compose_body(template["body"], template.get("footer", ""), signature, c)
         try:
             graph_mail.send_mail(
                 c["email"],

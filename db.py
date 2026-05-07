@@ -32,6 +32,7 @@ CREATE TABLE IF NOT EXISTS templates (
     art TEXT NOT NULL UNIQUE,
     subject TEXT NOT NULL,
     body TEXT NOT NULL,
+    footer TEXT NOT NULL DEFAULT '',
     updated_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -61,6 +62,7 @@ MIGRATIONS = """
 -- Ensure new columns exist on legacy tables
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE templates ADD COLUMN IF NOT EXISTS footer TEXT NOT NULL DEFAULT '';
 
 -- Migrate single 'name' into first_name/last_name and drop the old column
 DO $$
@@ -228,18 +230,19 @@ def get_template_by_art(art: str):
         return dict(row) if row else None
 
 
-def upsert_template(art, subject, body):
+def upsert_template(art, subject, body, footer=""):
     with get_conn() as c, c.cursor() as cur:
         cur.execute(
             """
-            INSERT INTO templates (art, subject, body, updated_at)
-            VALUES (%s, %s, %s, NOW())
+            INSERT INTO templates (art, subject, body, footer, updated_at)
+            VALUES (%s, %s, %s, %s, NOW())
             ON CONFLICT (art) DO UPDATE SET
                 subject = EXCLUDED.subject,
                 body = EXCLUDED.body,
+                footer = EXCLUDED.footer,
                 updated_at = NOW()
             """,
-            (art.strip(), subject, body),
+            (art.strip(), subject, body, footer or ""),
         )
 
 
