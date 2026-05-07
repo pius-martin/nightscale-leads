@@ -75,14 +75,12 @@
 
                 {% if ms_accounts %}
                 <div class="send-actions" style="align-items:flex-end; gap:14px">
-                    {% if ms_accounts|length > 1 %}
                     <label style="display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.07em; font-weight:500">
                         Send from
-                        <select id="account-picker" style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:9px 12px; border-radius:6px; font-size:13.5px; min-width:220px; text-transform:none; letter-spacing:normal; font-weight:400">
+                        <select id="account-picker" style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:9px 12px; border-radius:6px; font-size:13.5px; min-width:240px; text-transform:none; letter-spacing:normal; font-weight:400">
                             {% for a in ms_accounts %}<option value="{{ a.username }}">{{ a.username }}</option>{% endfor %}
                         </select>
                     </label>
-                    {% endif %}
 
                     {% if new_count > 0 %}
                     <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Send {{ new_count }} new email{{ '' if new_count == 1 else 's' }}?');">

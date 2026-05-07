@@ -118,17 +118,32 @@ def inject_globals():
 
 
 MISSING_MARKER = "xxx"
+_PLACEHOLDER_RE = re.compile(r"\{\{\s*(\w+)\s*\}\}")
+# Inline style applied to every substituted value in HTML output. Forces the
+# substituted text to render in exactly the same color/style as the surrounding
+# text, defeating Apple Mail data detectors and other clients that color
+# detected entities (company names, etc.) differently.
+_VAR_STYLE = (
+    "color:inherit !important;background:transparent !important;"
+    "background-color:transparent !important;text-decoration:inherit;"
+    "font:inherit"
+)
 
 
-def render_template_text(text: str, contact: dict) -> str:
-    """Replace {{firma}}, {{first_name}}, {{last_name}}, {{name}}, {{email}}, {{art}} placeholders.
-    Missing or empty fields are filled with MISSING_MARKER so the gap is visible
-    in the preview rather than an empty hole."""
+def render_template_text(text: str, contact: dict, html_safe: bool = False) -> str:
+    """Replace {{firma}}, {{first_name}}, {{last_name}}, {{name}}, {{email}}, {{art}}.
+    Missing fields render as MISSING_MARKER. When html_safe is True, the
+    substituted value is wrapped in a <span> with explicit inherited styling,
+    so Apple Mail and others don't tint detected entities."""
     def repl(m):
         key = m.group(1).strip().lower()
         value = str(contact.get(key, "") or "").strip()
-        return value if value else MISSING_MARKER
-    return re.sub(r"\{\{\s*(\w+)\s*\}\}", repl, text or "")
+        if not value:
+            value = MISSING_MARKER
+        if html_safe:
+            return f'<span style="{_VAR_STYLE}">{value}</span>'
+        return value
+    return _PLACEHOLDER_RE.sub(repl, text or "")
 
 
 @app.route("/health")
@@ -417,10 +432,12 @@ def _to_html(text: str) -> str:
 def _compose_body(template_body: str, template_footer: str, signature: str, contact: dict) -> str:
     """Stitch body + footer + signature into one HTML body. Each section is
     already block-level (Quill <p> tags or plain text wrapped in <p>), so we
-    concatenate without adding extra <br><br> which caused doubled spacing."""
+    concatenate without adding extra <br><br> which caused doubled spacing.
+    Substituted variables are wrapped in a span with explicit inherited
+    styling so clients don't tint them."""
     parts = []
     for raw in (template_body, template_footer, signature):
-        rendered = render_template_text(raw or "", contact)
+        rendered = render_template_text(raw or "", contact, html_safe=True)
         html = _to_html(rendered)
         if html:
             parts.append(html)
@@ -441,28 +458,33 @@ EMAIL_HTML_TEMPLATE = """<!DOCTYPE html>
 <html lang="en">
 <head>
 <meta charset="utf-8">
-<meta name="viewport" content="width=device-width, initial-scale=1.0">
 <meta name="color-scheme" content="only light">
 <meta name="supported-color-schemes" content="only light">
 <meta name="x-apple-disable-message-reformatting">
 <meta name="format-detection" content="telephone=no,date=no,address=no,email=no,url=no">
-<title>Nightscale</title>
 <style>
-  /* Force light theme on every element so Apple Mail / Outlook don't auto-invert */
   :root {{ color-scheme: only light; supported-color-schemes: only light; }}
-  body, body * {{ background-color:transparent !important; }}
-  body {{ margin:0; padding:0; background-color:#ffffff !important; color:#1a1a1a !important; }}
-  .wrap {{ max-width:640px; margin:0 auto; padding:24px; font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif; color:#1a1a1a !important; background-color:#ffffff !important; line-height:1.55; font-size:15px; }}
-  .wrap p {{ margin:0 0 1em; color:#1a1a1a !important; }}
-  .wrap a {{ color:#0a66c2 !important; text-decoration:underline; }}
-  .wrap strong, .wrap b {{ font-weight:600; color:#1a1a1a !important; background-color:transparent !important; }}
-  .wrap em, .wrap i {{ color:#1a1a1a !important; }}
-  .wrap ul, .wrap ol {{ margin:0 0 1em; padding-left:24px; color:#1a1a1a !important; }}
-  .wrap blockquote {{ margin:0 0 1em; padding:8px 14px; border-left:3px solid #d0d0d0; color:#444 !important; }}
+  body, body * {{ background-color: transparent !important; }}
+  body {{
+    margin: 0;
+    padding: 0;
+    background-color: #ffffff !important;
+    color: #000000;
+    font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+    font-size: 14px;
+    line-height: 1.45;
+  }}
+  p {{ margin: 0 0 0.25em; color: #000000; }}
+  p:empty {{ margin: 0; min-height: 1em; }}
+  a {{ color: #0a66c2; }}
+  strong, b {{ font-weight: 600; color: inherit; }}
+  em, i {{ color: inherit; }}
+  ul, ol {{ margin: 0 0 0.5em; padding-left: 22px; }}
+  blockquote {{ margin: 0 0 0.5em; padding-left: 12px; border-left: 2px solid #d0d0d0; color: #555; }}
 </style>
 </head>
-<body>
-<div class="wrap" style="color:#1a1a1a;background-color:#ffffff;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;line-height:1.55;font-size:15px;max-width:640px;margin:0 auto;padding:24px;">{content}</div>
+<body style="margin:0;padding:0;background-color:#ffffff;color:#000000;font-family:-apple-system,BlinkMacSystemFont,'Segoe UI',Roboto,'Helvetica Neue',Arial,sans-serif;font-size:14px;line-height:1.45;">
+{content}
 </body>
 </html>"""
 
