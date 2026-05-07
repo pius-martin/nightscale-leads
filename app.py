@@ -1,7 +1,9 @@
+import hmac
 import os
 import re
 import threading
 from functools import wraps
+from urllib.parse import urlparse
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session
 from dotenv import load_dotenv
 
@@ -12,9 +14,26 @@ load_dotenv()
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-key-change-me")
-app.config["PERMANENT_SESSION_LIFETIME"] = 60 * 60 * 24 * 30  # 30 days
+app.config.update(
+    PERMANENT_SESSION_LIFETIME=60 * 60 * 24 * 30,  # 30 days
+    SESSION_COOKIE_HTTPONLY=True,
+    SESSION_COOKIE_SAMESITE="Lax",
+    SESSION_COOKIE_SECURE=os.environ.get("FLASK_ENV", "production") == "production",
+)
 
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
+
+
+def _safe_next(target: str | None) -> str:
+    """Only allow same-origin relative paths to prevent open redirect."""
+    if not target:
+        return ""
+    parsed = urlparse(target)
+    if parsed.scheme or parsed.netloc:
+        return ""
+    if not target.startswith("/") or target.startswith("//"):
+        return ""
+    return target
 
 _db_ready = {"ok": False, "error": None}
 _db_lock = threading.Lock()
@@ -43,7 +62,7 @@ def login_required(f):
             return f(*args, **kwargs)
         if session.get("authed"):
             return f(*args, **kwargs)
-        return redirect(url_for("login", next=request.path))
+        return redirect(url_for("login", next=_safe_next(request.path)))
     return wrapper
 
 
@@ -57,7 +76,7 @@ def gate():
     if err:
         return render_template("db_error.html", error=err), 503
     if APP_PASSWORD and not session.get("authed"):
-        return redirect(url_for("login", next=request.path))
+        return redirect(url_for("login", next=_safe_next(request.path)))
     return None
 
 
@@ -91,10 +110,11 @@ def login():
         return redirect(url_for("contacts"))
     error = None
     if request.method == "POST":
-        if request.form.get("password", "") == APP_PASSWORD:
+        submitted = request.form.get("password", "")
+        if hmac.compare_digest(submitted, APP_PASSWORD):
             session.permanent = True
             session["authed"] = True
-            nxt = request.args.get("next") or url_for("contacts")
+            nxt = _safe_next(request.args.get("next")) or url_for("contacts")
             return redirect(nxt)
         error = "Wrong password."
     return render_template("login.html", error=error)
@@ -169,9 +189,11 @@ def types_view():
     return render_template("types.html", arten=arten, counts=counts)
 
 
-@app.route("/types/<name>/delete", methods=["POST"])
-def delete_type(name):
-    db.delete_art(name)
+@app.route("/types/delete", methods=["POST"])
+def delete_type():
+    name = request.form.get("name", "").strip()
+    if name:
+        db.delete_art(name)
     return redirect(url_for("types_view"))
 
 
