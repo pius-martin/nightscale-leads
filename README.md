@@ -59,29 +59,30 @@ Railway hostet die App, eine Subdomain bei World4You zeigt per CNAME drauf.
 4. Railway erkennt Python automatisch und baut über Nixpacks; die `Procfile` wird
    verwendet.
 
-### 2. Environment Variables setzen
+### 2. Postgres anbinden
 
-Im Railway-Service unter **Variables**:
+Im Railway-Projekt sollte ein Postgres-Service bereits laufen. Im Web-Service
+unter **Variables → New Variable → Add Reference**:
+
+- Variable: `DATABASE_URL`
+- Wert: `${{Postgres.DATABASE_URL}}` (Railway Reference auf den Postgres-Service)
+
+Die Tabellen werden beim ersten Start automatisch erstellt.
+
+### 3. Weitere Environment Variables
+
+Im Web-Service unter **Variables**:
 
 | Variable           | Wert                                         |
 |--------------------|----------------------------------------------|
+| `DATABASE_URL`     | `${{Postgres.DATABASE_URL}}` (siehe oben)     |
 | `AZURE_CLIENT_ID`  | `42f15015-c60a-4472-97ca-d19f2417c66e`        |
 | `AZURE_TENANT_ID`  | `bc7f9f38-30a5-4eda-a455-0f714ba84fab`        |
 | `FLASK_SECRET_KEY` | Langer Zufallsstring (z.B. `openssl rand -hex 32`) |
 | `APP_PASSWORD`     | Passwort für den App-Zugang                   |
 | `SENDER_EMAIL`     | `pius@nightscale.ai`                          |
-| `DATA_DIR`         | `/data`                                       |
 
-### 3. Volume für persistente Daten
-
-SQLite und Token-Cache müssen Restarts/Deploys überleben:
-
-1. Service → **Settings → Volumes → + New Volume**
-2. Mount Path: `/data`
-3. Größe: 1 GB reicht.
-
-Ohne Volume verlierst du Kontakte, Templates und den Microsoft-Login bei jedem
-Redeploy.
+Kein Volume nötig — alles inkl. Microsoft-Token-Cache läuft über Postgres.
 
 ### 4. Erster Start + Microsoft-Login
 

@@ -1,14 +1,13 @@
 import os
-import atexit
 import threading
 import msal
 import requests
 
+import db as _db
+
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 SCOPES = ["Mail.Send"]
-DATA_DIR = os.environ.get("DATA_DIR", os.path.dirname(__file__))
-os.makedirs(DATA_DIR, exist_ok=True)
-CACHE_PATH = os.path.join(DATA_DIR, "token_cache.bin")
+TOKEN_CACHE_KEY = "msal_token_cache"
 
 _lock = threading.Lock()
 _pending_flow = None
@@ -17,17 +16,21 @@ _app_cache = None  # (app, cache, client_id, tenant_id)
 
 def _load_cache():
     cache = msal.SerializableTokenCache()
-    if os.path.exists(CACHE_PATH):
-        with open(CACHE_PATH, "r") as f:
-            cache.deserialize(f.read())
-    atexit.register(lambda: _save_cache(cache))
+    try:
+        serialized = _db.get_setting(TOKEN_CACHE_KEY, "")
+    except Exception:
+        serialized = ""
+    if serialized:
+        cache.deserialize(serialized)
     return cache
 
 
 def _save_cache(cache):
     if cache.has_state_changed:
-        with open(CACHE_PATH, "w") as f:
-            f.write(cache.serialize())
+        try:
+            _db.set_setting(TOKEN_CACHE_KEY, cache.serialize())
+        except Exception:
+            pass
 
 
 def _build_app():
@@ -109,15 +112,19 @@ def signed_in_account():
 
 
 def sign_out():
-    app, cache = _build_app()
-    for acc in app.get_accounts():
-        app.remove_account(acc)
-    _save_cache(cache)
-    if os.path.exists(CACHE_PATH):
-        try:
-            os.remove(CACHE_PATH)
-        except OSError:
-            pass
+    global _app_cache
+    try:
+        app, cache = _build_app()
+        for acc in app.get_accounts():
+            app.remove_account(acc)
+        _save_cache(cache)
+    except Exception:
+        pass
+    try:
+        _db.delete_setting(TOKEN_CACHE_KEY)
+    except Exception:
+        pass
+    _app_cache = None
 
 
 def send_mail(
