@@ -141,7 +141,8 @@ def contacts():
             db.add_art(art)
         db.add_contact(
             firma=request.form.get("firma", ""),
-            name=request.form.get("name", ""),
+            first_name=request.form.get("first_name", ""),
+            last_name=request.form.get("last_name", ""),
             email=request.form.get("email", ""),
             art=art,
             notes=request.form.get("notes", ""),
@@ -160,7 +161,8 @@ def edit_contact(cid):
         db.update_contact(
             cid,
             firma=request.form.get("firma", ""),
-            name=request.form.get("name", ""),
+            first_name=request.form.get("first_name", ""),
+            last_name=request.form.get("last_name", ""),
             email=request.form.get("email", ""),
             art=request.form.get("art", ""),
             notes=request.form.get("notes", ""),
@@ -185,8 +187,11 @@ def types_view():
             db.add_art(name)
         return redirect(url_for("types_view"))
     arten = db.list_arten()
-    counts = {a: db.art_usage_count(a) for a in arten}
-    return render_template("types.html", arten=arten, counts=counts)
+    groups = []
+    for a in arten:
+        contacts_for_a = db.list_contacts(art=a)
+        groups.append({"name": a, "contacts": contacts_for_a, "count": len(contacts_for_a)})
+    return render_template("types.html", groups=groups)
 
 
 @app.route("/types/delete", methods=["POST"])
@@ -227,6 +232,16 @@ def delete_template(tid):
     return redirect(url_for("templates_view"))
 
 
+def _compose_body(template_body: str, signature: str, contact: dict) -> str:
+    body = render_template_text(template_body, contact)
+    sig = render_template_text(signature, contact) if signature else ""
+    if sig:
+        sig_html = sig if "<" in sig and ">" in sig else sig.replace("\n", "<br>")
+        body_html_main = body if "<" in body and ">" in body else body.replace("\n", "<br>")
+        return f"{body_html_main}<br><br>{sig_html}"
+    return body if "<" in body and ">" in body else body.replace("\n", "<br>")
+
+
 # ---------- Send ----------
 @app.route("/send", methods=["GET"])
 def send_view():
@@ -234,14 +249,21 @@ def send_view():
     selected = request.args.get("art") or (arten[0] if arten else "")
     template = db.get_template_by_art(selected) if selected else None
     contacts_for_art = db.list_contacts(art=selected) if selected else []
+    already = db.sent_contact_ids(selected) if selected else set()
+    signature = db.get_setting("email_signature", "")
 
     previews = []
+    new_count = 0
     if template and contacts_for_art:
         for c in contacts_for_art:
+            sent_before = c["id"] in already
+            if not sent_before:
+                new_count += 1
             previews.append({
                 "contact": c,
                 "subject": render_template_text(template["subject"], c),
-                "body": render_template_text(template["body"], c),
+                "body": _compose_body(template["body"], signature, c),
+                "already_sent": sent_before,
             })
     log = db.list_log(50)
     return render_template(
@@ -250,6 +272,8 @@ def send_view():
         selected=selected,
         template=template,
         previews=previews,
+        new_count=new_count,
+        total_count=len(previews),
         log=log,
     )
 
@@ -257,6 +281,7 @@ def send_view():
 @app.route("/send/run", methods=["POST"])
 def send_run():
     art = request.form.get("art", "").strip()
+    mode = request.form.get("mode", "new")  # 'new' or 'all'
     if not art:
         flash("No type selected.", "error")
         return redirect(url_for("send_view"))
@@ -270,13 +295,17 @@ def send_run():
         return redirect(url_for("send_view", art=art))
 
     contacts_for_art = db.list_contacts(art=art)
+    already = db.sent_contact_ids(art) if mode == "new" else set()
     sender_name = db.get_setting("sender_name", "")
     sender_email = db.get_setting("sender_email", "") or os.environ.get("SENDER_EMAIL", "")
-    sent, failed = 0, 0
+    signature = db.get_setting("email_signature", "")
+    sent, failed, skipped = 0, 0, 0
     for c in contacts_for_art:
+        if mode == "new" and c["id"] in already:
+            skipped += 1
+            continue
         subject = render_template_text(template["subject"], c)
-        body = render_template_text(template["body"], c)
-        body_html = body if "<" in body and ">" in body else body.replace("\n", "<br>")
+        body_html = _compose_body(template["body"], signature, c)
         try:
             graph_mail.send_mail(
                 c["email"],
@@ -290,7 +319,12 @@ def send_run():
         except Exception as e:
             db.log_send(c["id"], c["email"], art, subject, "failed", str(e))
             failed += 1
-    flash(f"Sent {sent}, failed {failed}.", "success" if failed == 0 else "error")
+    parts = [f"Sent {sent}"]
+    if skipped:
+        parts.append(f"skipped {skipped} already-sent")
+    if failed:
+        parts.append(f"{failed} failed")
+    flash(", ".join(parts) + ".", "success" if failed == 0 else "error")
     return redirect(url_for("send_view", art=art))
 
 
@@ -300,6 +334,7 @@ def settings_view():
     if request.method == "POST":
         db.set_setting("sender_name", request.form.get("sender_name", "").strip())
         db.set_setting("sender_email", request.form.get("sender_email", "").strip())
+        db.set_setting("email_signature", request.form.get("email_signature", ""))
         flash("Saved.", "success")
         return redirect(url_for("settings_view"))
     return render_template("settings.html")

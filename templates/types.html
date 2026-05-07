@@ -1,50 +1,61 @@
 {% extends "base.html" %}
 {% block title %}Types · Nightscale{% endblock %}
-{% block container_class %} narrow{% endblock %}
 {% block content %}
 
 <div class="page-header">
     <div>
         <h1>Types</h1>
-        <div class="subtitle">Categories for your contacts (e.g. Investor, Partner, Lead).</div>
+        <div class="subtitle">Categories with their assigned contacts.</div>
     </div>
 </div>
 
 <div class="card">
-    <div class="card-header">
-        <h2>Add new type</h2>
-    </div>
+    <div class="card-header"><h2>Add new type</h2></div>
     <form method="post" class="form">
-        <label>Name
-            <input type="text" name="name" required autocomplete="off" placeholder="e.g. Investor">
-        </label>
-        <div class="row">
+        <div class="row" style="gap:10px; align-items:flex-end">
+            <label style="flex:1; min-width:200px">Name
+                <input type="text" name="name" required autocomplete="off" placeholder="e.g. Investor">
+            </label>
             <button type="submit" class="btn btn-primary">Add type</button>
         </div>
     </form>
 </div>
 
-<div class="card mt">
-    <div class="card-header">
-        <h2>Existing types</h2>
-    </div>
-    {% if arten %}
-        <div class="stack">
-            {% for a in arten %}
-            <div class="type-chip">
-                <div>
-                    <span class="type-chip-name">{{ a }}</span>
-                    <span class="type-chip-meta">{{ counts[a] }} contact{{ '' if counts[a] == 1 else 's' }}</span>
+<div class="mt-lg">
+    {% if groups %}
+        {% for g in groups %}
+        <div class="type-group">
+            <div class="type-group-header">
+                <div class="type-group-title">
+                    <h3>{{ g.name }}</h3>
+                    <span class="type-group-count">{{ g.count }} contact{{ '' if g.count == 1 else 's' }}</span>
                 </div>
-                <form action="{{ url_for('delete_type') }}" method="post" onsubmit="return confirm('Delete this type? Contacts assigned to it will keep the label but you will not be able to pick it again.');">
-                    <input type="hidden" name="name" value="{{ a }}">
-                    <button class="btn btn-danger btn-sm" type="submit">Delete</button>
-                </form>
+                <div class="row">
+                    <a class="btn btn-ghost btn-sm" href="{{ url_for('templates_view', art=g.name) }}">Template</a>
+                    <a class="btn btn-ghost btn-sm" href="{{ url_for('send_view', art=g.name) }}">Send</a>
+                    <form action="{{ url_for('delete_type') }}" method="post" onsubmit="return confirm('Delete this type? Contacts keep the label but you cannot pick it again.');">
+                        <input type="hidden" name="name" value="{{ g.name }}">
+                        <button class="btn btn-danger btn-sm" type="submit">Delete</button>
+                    </form>
+                </div>
             </div>
-            {% endfor %}
+            {% if g.contacts %}
+                {% for c in g.contacts %}
+                <div class="contact-row">
+                    <div class="firma">{{ c.firma }}</div>
+                    <div class="name">{{ c.first_name }} {{ c.last_name }}</div>
+                    <div class="email">{{ c.email }}</div>
+                </div>
+                {% endfor %}
+            {% else %}
+                <div class="type-group-empty">No contacts of this type yet.</div>
+            {% endif %}
         </div>
+        {% endfor %}
     {% else %}
-        <div class="empty"><p>No types yet. Create one above.</p></div>
+        <div class="card empty">
+            <p>No types yet. Create one above.</p>
+        </div>
     {% endif %}
 </div>
 

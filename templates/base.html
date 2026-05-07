@@ -4,15 +4,16 @@
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>{% block title %}Nightscale Leads{% endblock %}</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
     <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
     {% block head %}{% endblock %}
 </head>
 <body>
     <header class="topbar">
-        <div class="brand">
+        <a href="{{ url_for('contacts') }}" class="brand">
             <span class="dot"></span>
-            <span>nightscale</span>
-        </div>
+            <span class="brand-name">NIGHTSCALE</span>
+        </a>
         <nav class="nav">
             <a href="{{ url_for('contacts') }}" class="{% if request.endpoint in ['contacts','edit_contact'] %}active{% endif %}">Contacts</a>
             <a href="{{ url_for('types_view') }}" class="{% if request.endpoint == 'types_view' %}active{% endif %}">Types</a>

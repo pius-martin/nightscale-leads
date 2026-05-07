@@ -19,7 +19,8 @@ SCHEMA = """
 CREATE TABLE IF NOT EXISTS contacts (
     id SERIAL PRIMARY KEY,
     firma TEXT NOT NULL,
-    name TEXT NOT NULL,
+    first_name TEXT NOT NULL DEFAULT '',
+    last_name TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL,
     art TEXT NOT NULL,
     notes TEXT DEFAULT '',
@@ -56,6 +57,29 @@ CREATE TABLE IF NOT EXISTS sent_log (
 );
 """
 
+MIGRATIONS = """
+-- Ensure new columns exist on legacy tables
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
+
+-- Migrate single 'name' into first_name/last_name and drop the old column
+DO $$
+BEGIN
+    IF EXISTS (SELECT 1 FROM information_schema.columns
+               WHERE table_name='contacts' AND column_name='name') THEN
+        UPDATE contacts SET
+            first_name = SPLIT_PART(COALESCE(name, ''), ' ', 1),
+            last_name = CASE
+                WHEN POSITION(' ' IN COALESCE(name, '')) > 0
+                    THEN TRIM(SUBSTRING(name FROM POSITION(' ' IN name) + 1))
+                ELSE ''
+            END
+        WHERE first_name = '' AND last_name = '' AND name IS NOT NULL;
+        ALTER TABLE contacts DROP COLUMN name;
+    END IF;
+END $$;
+"""
+
 
 @contextmanager
 def get_conn():
@@ -77,7 +101,7 @@ def _dict_cursor(conn):
 def init_db():
     with get_conn() as c, c.cursor() as cur:
         cur.execute(SCHEMA)
-        # Backfill arten from existing data
+        cur.execute(MIGRATIONS)
         cur.execute(
             """
             INSERT INTO arten (name)
@@ -126,6 +150,13 @@ def art_usage_count(name: str) -> int:
 
 
 # Contacts
+def _attach_full_name(row: dict) -> dict:
+    fn = (row.get("first_name") or "").strip()
+    ln = (row.get("last_name") or "").strip()
+    row["name"] = f"{fn} {ln}".strip()
+    return row
+
+
 def list_contacts(art: str | None = None):
     with get_conn() as c:
         cur = _dict_cursor(c)
@@ -136,22 +167,22 @@ def list_contacts(art: str | None = None):
             )
         else:
             cur.execute("SELECT * FROM contacts ORDER BY LOWER(firma)")
-        return [dict(r) for r in cur.fetchall()]
+        return [_attach_full_name(dict(r)) for r in cur.fetchall()]
 
 
-def add_contact(firma, name, email, art, notes=""):
+def add_contact(firma, first_name, last_name, email, art, notes=""):
     with get_conn() as c, c.cursor() as cur:
         cur.execute(
-            "INSERT INTO contacts (firma, name, email, art, notes) VALUES (%s, %s, %s, %s, %s)",
-            (firma.strip(), name.strip(), email.strip(), art.strip(), notes.strip()),
+            "INSERT INTO contacts (firma, first_name, last_name, email, art, notes) VALUES (%s, %s, %s, %s, %s, %s)",
+            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), notes.strip()),
         )
 
 
-def update_contact(cid, firma, name, email, art, notes=""):
+def update_contact(cid, firma, first_name, last_name, email, art, notes=""):
     with get_conn() as c, c.cursor() as cur:
         cur.execute(
-            "UPDATE contacts SET firma=%s, name=%s, email=%s, art=%s, notes=%s WHERE id=%s",
-            (firma.strip(), name.strip(), email.strip(), art.strip(), notes.strip(), cid),
+            "UPDATE contacts SET firma=%s, first_name=%s, last_name=%s, email=%s, art=%s, notes=%s WHERE id=%s",
+            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), notes.strip(), cid),
         )
 
 
@@ -165,7 +196,20 @@ def get_contact(cid):
         cur = _dict_cursor(c)
         cur.execute("SELECT * FROM contacts WHERE id=%s", (cid,))
         row = cur.fetchone()
-        return dict(row) if row else None
+        return _attach_full_name(dict(row)) if row else None
+
+
+def sent_contact_ids(art: str) -> set:
+    """Returns set of contact_ids that have already received a 'sent' email for this art."""
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            SELECT DISTINCT contact_id FROM sent_log
+            WHERE art=%s AND status='sent' AND contact_id IS NOT NULL
+            """,
+            (art,),
+        )
+        return {r[0] for r in cur.fetchall()}
 
 
 # Templates

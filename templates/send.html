@@ -32,13 +32,7 @@
     <div>
         <div class="card">
             <div class="card-header">
-                <h2><span class="tag">{{ selected }}</span> · {{ previews|length }} recipient{{ '' if previews|length == 1 else 's' }}</h2>
-                {% if template and previews and signed_in %}
-                <form action="{{ url_for('send_run') }}" method="post" onsubmit="return confirm('Send {{ previews|length }} emails now?')" style="display:inline">
-                    <input type="hidden" name="art" value="{{ selected }}">
-                    <button class="btn btn-primary" type="submit">Send {{ previews|length }} emails</button>
-                </form>
-                {% endif %}
+                <h2><span class="tag">{{ selected }}</span></h2>
             </div>
 
             {% if not signed_in %}
@@ -56,11 +50,40 @@
             {% elif not previews %}
                 <div class="empty"><p>No contacts of type "{{ selected }}" yet.</p></div>
             {% else %}
+                {% set already_count = total_count - new_count %}
+                <div class="send-stats">
+                    <div class="stat"><span class="stat-label">Total</span><span class="stat-value">{{ total_count }}</span></div>
+                    <div class="stat"><span class="stat-label">New</span><span class="stat-value">{{ new_count }}</span></div>
+                    <div class="stat"><span class="stat-label">Already sent</span><span class="stat-value dim">{{ already_count }}</span></div>
+                </div>
+
+                {% if signed_in %}
+                <div class="send-actions">
+                    {% if new_count > 0 %}
+                    <form action="{{ url_for('send_run') }}" method="post" onsubmit="return confirm('Send {{ new_count }} new email{{ '' if new_count == 1 else 's' }}?');">
+                        <input type="hidden" name="art" value="{{ selected }}">
+                        <input type="hidden" name="mode" value="new">
+                        <button class="btn btn-primary" type="submit">Send to {{ new_count }} new</button>
+                    </form>
+                    {% endif %}
+                    <form action="{{ url_for('send_run') }}" method="post" onsubmit="return confirm('Re-send to ALL {{ total_count }} recipient{{ '' if total_count == 1 else 's' }} (including duplicates)?');">
+                        <input type="hidden" name="art" value="{{ selected }}">
+                        <input type="hidden" name="mode" value="all">
+                        <button class="btn btn-ghost" type="submit">Send to all {{ total_count }}</button>
+                    </form>
+                </div>
+                {% endif %}
+
+                <h3 class="mt">Preview</h3>
                 <div class="previews">
                     {% for p in previews %}
-                    <details class="preview">
+                    <details class="preview {% if p.already_sent %}sent{% endif %}">
                         <summary>
-                            <span><strong>{{ p.contact.firma }}</strong> &middot; {{ p.contact.name }}</span>
+                            <span>
+                                <strong>{{ p.contact.firma }}</strong>
+                                &middot; {{ p.contact.first_name }} {{ p.contact.last_name }}
+                                {% if p.already_sent %}<span class="badge dim" style="margin-left:8px">already sent</span>{% endif %}
+                            </span>
                             <span class="mono muted">{{ p.contact.email }}</span>
                         </summary>
                         <div class="preview-body">

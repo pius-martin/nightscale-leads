@@ -1,6 +1,9 @@
 {% extends "base.html" %}
 {% block title %}Settings · Nightscale{% endblock %}
 {% block container_class %} narrow{% endblock %}
+{% block head %}
+<link href="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.snow.css" rel="stylesheet">
+{% endblock %}
 {% block content %}
 
 <div class="page-header">
@@ -11,7 +14,7 @@
 </div>
 
 <div class="card">
-    <form method="post" class="form">
+    <form method="post" class="form" id="settings-form">
         <label>Sender name (display)
             <input type="text" name="sender_name" value="{{ settings.get('sender_name', '') }}" placeholder="e.g. Pius Martin · Nightscale">
             <span class="hint">What recipients see in their inbox.</span>
@@ -20,6 +23,25 @@
             <input type="email" name="sender_email" value="{{ settings.get('sender_email', '') }}" placeholder="pius@nightscale.ai">
             <span class="hint">Leave empty to use the signed-in account. Override only works if you have Send-As permission.</span>
         </label>
+        <label>Email signature
+            <span class="hint">Appended to every email. Supports placeholders like {{ '{{name}}' }}, {{ '{{firma}}' }}.</span>
+        </label>
+        <div id="sig-toolbar">
+            <span class="ql-formats">
+                <button class="ql-bold"></button>
+                <button class="ql-italic"></button>
+                <button class="ql-underline"></button>
+            </span>
+            <span class="ql-formats">
+                <button class="ql-link"></button>
+            </span>
+            <span class="ql-formats">
+                <button class="ql-clean"></button>
+            </span>
+        </div>
+        <div id="sig-editor"></div>
+        <textarea name="email_signature" id="sig-input" hidden>{{ settings.get('email_signature', '') }}</textarea>
+
         <div class="row">
             <button type="submit" class="btn btn-primary">Save</button>
         </div>
@@ -39,4 +61,23 @@
     {% endif %}
 </div>
 
+{% endblock %}
+{% block scripts %}
+<script src="https://cdn.jsdelivr.net/npm/quill@2.0.2/dist/quill.js"></script>
+<script>
+const initial = {{ settings.get('email_signature', '') | tojson }};
+const sig = new Quill('#sig-editor', {
+    theme: 'snow',
+    modules: { toolbar: '#sig-toolbar' },
+    placeholder: 'Best,\nPius'
+});
+if (initial) {
+    if (initial.trim().startsWith('<')) sig.clipboard.dangerouslyPasteHTML(initial);
+    else sig.setText(initial);
+}
+document.getElementById('settings-form').addEventListener('submit', () => {
+    const html = sig.root.innerHTML;
+    document.getElementById('sig-input').value = (sig.getText().trim() === '') ? '' : html;
+});
+</script>
 {% endblock %}
