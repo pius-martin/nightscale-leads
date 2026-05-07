@@ -62,7 +62,16 @@
                     <div class="stat"><span class="stat-label">Total</span><span class="stat-value">{{ total_count }}</span></div>
                     <div class="stat"><span class="stat-label">New</span><span class="stat-value">{{ new_count }}</span></div>
                     <div class="stat"><span class="stat-label">Already sent</span><span class="stat-value dim">{{ already_count }}</span></div>
+                    {% if incomplete_count %}
+                    <div class="stat"><span class="stat-label">Incomplete</span><span class="stat-value" style="color:var(--warn)">{{ incomplete_count }}</span></div>
+                    {% endif %}
                 </div>
+
+                {% if incomplete_count %}
+                <div class="banner warn" style="margin-top:0">
+                    <span><strong>{{ incomplete_count }}</strong> contact{{ '' if incomplete_count == 1 else 's' }} {{ 'has' if incomplete_count == 1 else 'have' }} placeholders rendering as <code class="mono">{{ marker }}</code>. Review them below or fix the contact data before sending.</span>
+                </div>
+                {% endif %}
 
                 {% if ms_accounts %}
                 <div class="send-actions" style="align-items:flex-end; gap:14px">
@@ -95,7 +104,7 @@
                 <h3 class="mt">Preview</h3>
                 <div class="previews">
                     {% for p in previews %}
-                    <details class="preview {% if p.already_sent %}sent{% endif %}">
+                    <details class="preview {% if p.already_sent %}sent{% endif %} {% if p.incomplete %}incomplete{% endif %}">
                         <summary>
                             <span>
                                 <strong>{{ p.contact.firma or '—' }}</strong>
@@ -103,6 +112,7 @@
                                     &middot; {{ p.contact.first_name }} {{ p.contact.last_name }}
                                 {% endif %}
                                 <span class="badge dim" style="margin-left:8px">{{ p.template_variant }}</span>
+                                {% if p.incomplete %}<span class="badge err" style="margin-left:6px">incomplete</span>{% endif %}
                                 {% if p.already_sent %}<span class="badge dim" style="margin-left:6px">already sent</span>{% endif %}
                             </span>
                             <span class="mono muted">{{ p.contact.email }}</span>

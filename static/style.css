@@ -523,8 +523,10 @@ p { margin: 0 0 12px; }
     background: var(--ok);
 }
 
-/* Send: contact already-sent indicator */
+/* Send: contact already-sent / incomplete indicators */
 .preview.sent summary { opacity: 0.55; }
+.preview.incomplete { border-color: rgba(245, 158, 11, 0.35); }
+.preview.incomplete:hover { border-color: rgba(245, 158, 11, 0.55); }
 .send-actions { display: flex; gap: 12px; flex-wrap: wrap; margin-bottom: 8px; }
 .send-stats {
     display: flex;

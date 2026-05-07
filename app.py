@@ -117,11 +117,17 @@ def inject_globals():
     }
 
 
+MISSING_MARKER = "xxx"
+
+
 def render_template_text(text: str, contact: dict) -> str:
-    """Replace {{firma}}, {{name}}, {{email}}, {{art}} placeholders."""
+    """Replace {{firma}}, {{first_name}}, {{last_name}}, {{name}}, {{email}}, {{art}} placeholders.
+    Missing or empty fields are filled with MISSING_MARKER so the gap is visible
+    in the preview rather than an empty hole."""
     def repl(m):
         key = m.group(1).strip().lower()
-        return str(contact.get(key, "") or "")
+        value = str(contact.get(key, "") or "").strip()
+        return value if value else MISSING_MARKER
     return re.sub(r"\{\{\s*(\w+)\s*\}\}", repl, text or "")
 
 
@@ -482,6 +488,7 @@ def send_view():
 
     previews = []
     new_count = 0
+    incomplete_count = 0
     missing_variants = set()
     for c in contacts_for_art:
         variant = _contact_variant(c)
@@ -494,13 +501,19 @@ def send_view():
         sent_before = c["id"] in already
         if not sent_before:
             new_count += 1
+        subject = render_template_text(template["subject"], c)
+        body = _compose_body(template["body"], template.get("footer", ""), signature, c)
+        incomplete = MISSING_MARKER in subject or MISSING_MARKER in body
+        if incomplete:
+            incomplete_count += 1
         previews.append({
             "contact": c,
             "variant": variant,
             "template_variant": template["variant"],
-            "subject": render_template_text(template["subject"], c),
-            "body": _compose_body(template["body"], template.get("footer", ""), signature, c),
+            "subject": subject,
+            "body": body,
             "already_sent": sent_before,
+            "incomplete": incomplete,
         })
     log = db.list_log(50)
     return render_template(
@@ -511,7 +524,9 @@ def send_view():
         previews=previews,
         new_count=new_count,
         total_count=len(previews),
+        incomplete_count=incomplete_count,
         missing_variants=sorted(missing_variants),
+        marker=MISSING_MARKER,
         log=log,
     )
 
