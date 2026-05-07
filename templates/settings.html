@@ -54,17 +54,30 @@
         <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">+ Add account</a>
     </div>
     {% if ms_accounts %}
-        <div class="stack">
+        <p class="muted" style="margin:0 0 16px; font-size:13px">
+            Each account can have its own signature. If left empty, the global signature above is used.
+        </p>
+        <div class="stack" style="gap:18px">
             {% for a in ms_accounts %}
-            <div class="type-chip">
-                <div>
+            <div class="account-card">
+                <div class="account-card-header">
                     <span class="type-chip-name">{{ a.username }}</span>
+                    <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')">
+                        <input type="hidden" name="username" value="{{ a.username }}">
+                        <input type="hidden" name="from" value="settings">
+                        <button class="btn btn-danger btn-sm" type="submit">Disconnect</button>
+                    </form>
                 </div>
-                <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')">
-                    <input type="hidden" name="username" value="{{ a.username }}">
-                    <input type="hidden" name="from" value="settings">
-                    <button class="btn btn-danger btn-sm" type="submit">Disconnect</button>
-                </form>
+                <label style="margin-top:14px; display:flex; flex-direction:column; gap:8px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.07em; font-weight:500">
+                    Signature for this account
+                </label>
+                <div id="acct-toolbar-{{ loop.index0 }}" class="acct-toolbar">
+                    <span class="ql-formats"><button class="ql-bold"></button><button class="ql-italic"></button><button class="ql-underline"></button></span>
+                    <span class="ql-formats"><button class="ql-link"></button></span>
+                    <span class="ql-formats"><button class="ql-clean"></button></span>
+                </div>
+                <div id="acct-editor-{{ loop.index0 }}" class="acct-editor"></div>
+                <textarea name="email_signature__{{ a.username }}" id="acct-input-{{ loop.index0 }}" form="settings-form" hidden data-username="{{ a.username }}">{{ account_signatures.get(a.username, '') }}</textarea>
             </div>
             {% endfor %}
         </div>
@@ -88,9 +101,30 @@ if (initial) {
     if (initial.trim().startsWith('<')) sig.clipboard.dangerouslyPasteHTML(initial);
     else sig.setText(initial);
 }
+
+// Per-account signature editors
+const acctEditors = [];
+document.querySelectorAll('[id^="acct-editor-"]').forEach(el => {
+    const idx = el.id.replace('acct-editor-', '');
+    const input = document.getElementById('acct-input-' + idx);
+    const initialAcct = input.value;
+    const q = new Quill('#acct-editor-' + idx, {
+        theme: 'snow',
+        modules: { toolbar: '#acct-toolbar-' + idx },
+        placeholder: 'Leave empty to use the global signature above'
+    });
+    if (initialAcct) {
+        if (initialAcct.trim().startsWith('<')) q.clipboard.dangerouslyPasteHTML(initialAcct);
+        else q.setText(initialAcct);
+    }
+    acctEditors.push({ q, input });
+});
+
 document.getElementById('settings-form').addEventListener('submit', () => {
-    const html = sig.root.innerHTML;
-    document.getElementById('sig-input').value = (sig.getText().trim() === '') ? '' : html;
+    document.getElementById('sig-input').value = (sig.getText().trim() === '') ? '' : sig.root.innerHTML;
+    acctEditors.forEach(({ q, input }) => {
+        input.value = (q.getText().trim() === '') ? '' : q.root.innerHTML;
+    });
 });
 </script>
 {% endblock %}

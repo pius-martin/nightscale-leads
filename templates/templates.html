@@ -118,6 +118,32 @@
                 <button type="submit" class="btn btn-primary">Save template</button>
             </div>
         </form>
+
+        {% if current %}
+        <div style="margin-top:24px; padding-top:20px; border-top:1px solid var(--border)">
+            <h3 style="margin:0 0 6px">Send test email</h3>
+            <p class="muted" style="margin:0 0 12px; font-size:12.5px">
+                Sends this template to the chosen account with random sample data filled in for the placeholders. The account's own signature (or the global one) is used.
+            </p>
+            {% if ms_accounts %}
+            <form action="{{ url_for('template_test_send') }}" method="post" class="row" style="gap:10px; align-items:flex-end">
+                <input type="hidden" name="art" value="{{ selected }}">
+                <input type="hidden" name="variant" value="{{ variant }}">
+                <label style="flex:1; min-width:240px; display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.07em; font-weight:500">
+                    Send to / from
+                    <select name="account" required style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:9px 12px; border-radius:6px; font-size:13.5px; text-transform:none; letter-spacing:normal; font-weight:400">
+                        {% for a in ms_accounts %}<option value="{{ a.username }}">{{ a.username }}</option>{% endfor %}
+                    </select>
+                </label>
+                <button type="submit" class="btn btn-ghost">Send test</button>
+            </form>
+            {% else %}
+            <p class="muted" style="margin:0; font-size:13px">
+                Connect at least one Microsoft account first — <a href="{{ url_for('auth_view') }}">Connect</a>.
+            </p>
+            {% endif %}
+        </div>
+        {% endif %}
     </div>
 </div>
 {% endif %}

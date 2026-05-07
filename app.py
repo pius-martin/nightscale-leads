@@ -2,6 +2,7 @@ import csv
 import hmac
 import io
 import os
+import random
 import re
 import threading
 from functools import wraps
@@ -98,6 +99,39 @@ def gate():
     if APP_PASSWORD and not session.get("authed"):
         return redirect(url_for("login", next=_safe_next(_current_full_path())))
     return None
+
+
+def _signature_for_account(username: str | None) -> str:
+    """Account-specific signature with fallback to the global one."""
+    if username:
+        sig = db.get_setting(f"email_signature_{username}", "")
+        if sig:
+            return sig
+    return db.get_setting("email_signature", "")
+
+
+SAMPLE_COMPANIES = [
+    "Acme GmbH", "Beta Holdings", "Café Sonne", "Restaurant Alpina",
+    "Vorarlberger Hof", "Bäckerei Müller", "Hotel Bergblick", "Studio Nord",
+]
+SAMPLE_FIRSTNAMES = ["Anna", "Max", "Lisa", "Tom", "Sarah", "Klaus", "Hannah", "Felix"]
+SAMPLE_LASTNAMES = ["Mustermann", "Müller", "Schmid", "Weber", "Berger", "Huber", "Bauer", "Fischer"]
+
+
+def _random_contact(art: str, variant: str, recipient_email: str) -> dict:
+    """Build a fake contact for test-send previews. The variant controls
+    whether names are filled in (personal) or left blank (anonymous)."""
+    contact = {
+        "firma": random.choice(SAMPLE_COMPANIES),
+        "first_name": "",
+        "last_name": "",
+        "email": recipient_email,
+        "art": art,
+    }
+    if variant == "personal":
+        contact["first_name"] = random.choice(SAMPLE_FIRSTNAMES)
+        contact["last_name"] = random.choice(SAMPLE_LASTNAMES)
+    return contact
 
 
 @app.context_processor
@@ -421,6 +455,47 @@ def delete_template(tid):
     return redirect(url_for("templates_view"))
 
 
+@app.route("/templates/test-send", methods=["POST"])
+def template_test_send():
+    art = request.form.get("art", "").strip()
+    variant = request.form.get("variant", "personal").strip()
+    account = request.form.get("account", "").strip()
+    if variant not in db.VARIANTS:
+        variant = "personal"
+    if not art:
+        flash("No type selected.", "error")
+        return redirect(url_for("templates_view"))
+    if not account:
+        flash("Pick an account to send the test from.", "error")
+        return redirect(url_for("templates_view", art=art, variant=variant))
+    template = db.get_template(art, variant)
+    if not template:
+        flash(f"No {variant} template for {art} yet.", "error")
+        return redirect(url_for("templates_view", art=art, variant=variant))
+
+    contact = _random_contact(art, variant, account)
+    sender_name = db.get_setting("sender_name", "")
+    sender_email = db.get_setting("sender_email", "") or os.environ.get("SENDER_EMAIL", "")
+    signature = _signature_for_account(account)
+
+    subject = "[TEST] " + render_template_text(template["subject"], contact)
+    body_html = _wrap_email_html(
+        _compose_body(template["body"], template.get("footer", ""), signature, contact)
+    )
+    try:
+        graph_mail.send_mail(
+            account, subject, body_html,
+            sender_name=sender_name or None,
+            sender_email=sender_email or None,
+            account=account,
+        )
+        who = f"{contact['first_name']} {contact['last_name']} · {contact['firma']}".strip(" ·")
+        flash(f"Test sent to {account} (rendered as: {who}).", "success")
+    except Exception as e:
+        flash(f"Test send failed: {e}", "error")
+    return redirect(url_for("templates_view", art=art, variant=variant))
+
+
 def _to_html(text: str) -> str:
     """Convert content to HTML. If it already contains tags, leave as-is.
     Plain text: split into paragraphs on blank lines, single newlines as <br>."""
@@ -582,7 +657,7 @@ def send_run():
     already = db.sent_contact_ids(art) if mode == "new" else set()
     sender_name = db.get_setting("sender_name", "")
     sender_email = db.get_setting("sender_email", "") or os.environ.get("SENDER_EMAIL", "")
-    signature = db.get_setting("email_signature", "")
+    signature = _signature_for_account(account)
     sent, failed, skipped = 0, 0, 0
     for c in contacts_for_art:
         if mode == "new" and c["id"] in already:
@@ -629,9 +704,23 @@ def settings_view():
         db.set_setting("sender_name", request.form.get("sender_name", "").strip())
         db.set_setting("sender_email", request.form.get("sender_email", "").strip())
         db.set_setting("email_signature", request.form.get("email_signature", ""))
+        # Per-account signatures: form fields named email_signature__<username>
+        for key, val in request.form.items():
+            if key.startswith("email_signature__"):
+                username = key[len("email_signature__"):]
+                if username:
+                    db.set_setting(f"email_signature_{username}", val)
         flash("Saved.", "success")
         return redirect(url_for("settings_view"))
-    return render_template("settings.html")
+    accounts = graph_mail.list_accounts()
+    account_signatures = {
+        a["username"]: db.get_setting(f"email_signature_{a['username']}", "")
+        for a in accounts
+    }
+    return render_template(
+        "settings.html",
+        account_signatures=account_signatures,
+    )
 
 
 # ---------- Auth (Microsoft) ----------
