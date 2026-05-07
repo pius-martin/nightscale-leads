@@ -5,6 +5,7 @@ import threading
 from functools import wraps
 from urllib.parse import urlparse
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session
+from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
 import db
@@ -21,6 +22,14 @@ app.config.update(
     SESSION_COOKIE_SECURE=os.environ.get("FLASK_ENV", "production") == "production",
 )
 
+# Trust X-Forwarded-* headers from the upstream proxy (Cloudflare/Railway).
+# x_prefix lets the app run under a path like /leadscrap; url_for() will
+# include the prefix automatically when the proxy forwards X-Forwarded-Prefix.
+app.wsgi_app = ProxyFix(
+    app.wsgi_app,
+    x_for=1, x_proto=1, x_host=1, x_prefix=1,
+)
+
 APP_PASSWORD = os.environ.get("APP_PASSWORD", "")
 
 
@@ -34,6 +43,15 @@ def _safe_next(target: str | None) -> str:
     if not target.startswith("/") or target.startswith("//"):
         return ""
     return target
+
+
+def _current_full_path() -> str:
+    """Path including any reverse-proxy prefix and the original query string.
+    Used as the ?next= value so login redirects survive the /leadscrap prefix."""
+    p = request.script_root + request.path
+    if request.query_string:
+        p += "?" + request.query_string.decode()
+    return p
 
 _db_ready = {"ok": False, "error": None}
 _db_lock = threading.Lock()
@@ -62,7 +80,7 @@ def login_required(f):
             return f(*args, **kwargs)
         if session.get("authed"):
             return f(*args, **kwargs)
-        return redirect(url_for("login", next=_safe_next(request.path)))
+        return redirect(url_for("login", next=_safe_next(_current_full_path())))
     return wrapper
 
 
@@ -76,7 +94,7 @@ def gate():
     if err:
         return render_template("db_error.html", error=err), 503
     if APP_PASSWORD and not session.get("authed"):
-        return redirect(url_for("login", next=_safe_next(request.path)))
+        return redirect(url_for("login", next=_safe_next(_current_full_path())))
     return None
 
 
