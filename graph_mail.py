@@ -1,3 +1,4 @@
+import json
 import os
 import threading
 import msal
@@ -7,58 +8,106 @@ import db as _db
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 SCOPES = ["Mail.Send"]
-TOKEN_CACHE_KEY = "msal_token_cache"
+LEGACY_CACHE_KEY = "msal_token_cache"
 
 _lock = threading.Lock()
 _pending_flow = None  # (app, cache, flow)
 
 
-def _load_cache_from_db() -> msal.SerializableTokenCache:
-    cache = msal.SerializableTokenCache()
+# ---------------------------------------------------------------------------
+# Per-account cache
+# ---------------------------------------------------------------------------
+
+def _migrate_legacy_cache_if_present():
+    """If a legacy single multi-account cache exists, split it into one row
+    per account and remove the legacy entry."""
+    legacy = _db.get_setting(LEGACY_CACHE_KEY, "")
+    if not legacy:
+        return
     try:
-        serialized = _db.get_setting(TOKEN_CACHE_KEY, "")
+        data = json.loads(legacy)
     except Exception:
-        serialized = ""
-    if serialized:
+        _db.delete_setting(LEGACY_CACHE_KEY)
+        return
+    accounts = data.get("Account", {}) or {}
+    for acct_key, acct_info in accounts.items():
+        username = (acct_info or {}).get("username")
+        home_id = (acct_info or {}).get("home_account_id")
+        if not username or not home_id:
+            continue
+        sub = {
+            "Account": {acct_key: acct_info},
+            "AccessToken": {
+                k: v for k, v in (data.get("AccessToken") or {}).items()
+                if home_id in k
+            },
+            "RefreshToken": {
+                k: v for k, v in (data.get("RefreshToken") or {}).items()
+                if home_id in k
+            },
+            "IdToken": {
+                k: v for k, v in (data.get("IdToken") or {}).items()
+                if home_id in k
+            },
+            "AppMetadata": data.get("AppMetadata", {}),
+        }
+        _db.upsert_ms_account(username, home_id, json.dumps(sub))
+    _db.delete_setting(LEGACY_CACHE_KEY)
+
+
+def _load_account_cache(username: str) -> msal.SerializableTokenCache:
+    cache = msal.SerializableTokenCache()
+    blob = ""
+    try:
+        blob = _db.get_ms_account_cache(username)
+    except Exception:
+        blob = ""
+    if blob:
         try:
-            cache.deserialize(serialized)
+            cache.deserialize(blob)
         except Exception:
             pass
     return cache
 
 
-def _save_cache(cache: msal.SerializableTokenCache):
-    if cache.has_state_changed:
-        try:
-            _db.set_setting(TOKEN_CACHE_KEY, cache.serialize())
-        except Exception:
-            pass
+def _save_account_cache(username: str, cache: msal.SerializableTokenCache, home_account_id: str | None = None):
+    if not cache.has_state_changed:
+        return
+    try:
+        hid = home_account_id
+        if not hid:
+            data = json.loads(cache.serialize() or "{}")
+            for v in (data.get("Account") or {}).values():
+                if v.get("username", "").lower() == username.lower():
+                    hid = v.get("home_account_id")
+                    break
+        _db.upsert_ms_account(username, hid or "", cache.serialize())
+    except Exception:
+        pass
 
 
-def _build_app():
-    """Build a fresh MSAL app + cache loaded from DB. The same cache holds all
-    signed-in user accounts; MSAL handles multi-account internally."""
+def _build_app_with_cache(cache: msal.SerializableTokenCache):
     client_id = os.environ.get("AZURE_CLIENT_ID")
     tenant_id = os.environ.get("AZURE_TENANT_ID")
     if not client_id or not tenant_id:
         raise RuntimeError("AZURE_CLIENT_ID and AZURE_TENANT_ID must be set")
-    cache = _load_cache_from_db()
-    app = msal.PublicClientApplication(
+    return msal.PublicClientApplication(
         client_id,
         authority=f"https://login.microsoftonline.com/{tenant_id}",
         token_cache=cache,
     )
-    return app, cache
 
+
+# ---------------------------------------------------------------------------
+# Public API
+# ---------------------------------------------------------------------------
 
 def list_accounts() -> list:
-    """Return all accounts currently in the token cache, as plain dicts."""
+    """All connected accounts. Backed by the ms_accounts DB table; does not
+    talk to Microsoft and never modifies any cache."""
     try:
-        app, _ = _build_app()
-        return [
-            {"username": a["username"], "home_account_id": a["home_account_id"]}
-            for a in app.get_accounts()
-        ]
+        _migrate_legacy_cache_if_present()
+        return _db.list_ms_accounts()
     except Exception:
         return []
 
@@ -72,36 +121,30 @@ def signed_in_account() -> str | None:
     return accs[0]["username"] if accs else None
 
 
-def _find_account(app, username: str | None):
-    accounts = app.get_accounts()
+def get_token_for(username: str | None = None) -> str | None:
+    accounts = list_accounts()
     if not accounts:
         return None
-    if username:
-        for a in accounts:
-            if a["username"].lower() == username.lower():
-                return a
+    target = username or accounts[0]["username"]
+    cache = _load_account_cache(target)
+    app = _build_app_with_cache(cache)
+    msal_accounts = app.get_accounts()
+    if not msal_accounts:
         return None
-    return accounts[0]
-
-
-def get_token_for(username: str | None = None) -> str | None:
-    app, cache = _build_app()
-    acc = _find_account(app, username)
-    if acc is None:
-        return None
-    result = app.acquire_token_silent(SCOPES, account=acc)
-    _save_cache(cache)
+    result = app.acquire_token_silent(SCOPES, account=msal_accounts[0])
+    _save_account_cache(target, cache, msal_accounts[0].get("home_account_id"))
     if result and "access_token" in result:
         return result["access_token"]
     return None
 
 
 def start_device_flow():
-    """Initiate device code flow. Returns dict with user_code, verification_uri, message.
-    If users are already signed in, the new login is added to the same cache."""
+    """Begin a device-code flow with a FRESH empty cache so the new account
+    is added independently of any existing accounts."""
     global _pending_flow
     with _lock:
-        app, cache = _build_app()
+        cache = msal.SerializableTokenCache()
+        app = _build_app_with_cache(cache)
         flow = app.initiate_device_flow(scopes=SCOPES)
         if "user_code" not in flow:
             raise RuntimeError(f"Failed to start device flow: {flow}")
@@ -115,32 +158,35 @@ def start_device_flow():
 
 
 def complete_device_flow():
-    """Block until the user completes the device flow. Returns True on success."""
     global _pending_flow
     with _lock:
         if _pending_flow is None:
             return False
         app, cache, flow = _pending_flow
     result = app.acquire_token_by_device_flow(flow)
-    _save_cache(cache)
+    success = "access_token" in result
+    if success:
+        msal_accounts = app.get_accounts()
+        if msal_accounts:
+            new_acc = msal_accounts[0]
+            username = new_acc["username"]
+            home_id = new_acc.get("home_account_id", "")
+            try:
+                _db.upsert_ms_account(username, home_id, cache.serialize())
+            except Exception:
+                pass
     with _lock:
         _pending_flow = None
-    return "access_token" in result
+    return success
 
 
 def sign_out(username: str | None = None):
-    """Remove the given account, or all accounts if username is None."""
+    """Disconnect a specific account, or every account when username is None."""
     try:
-        app, cache = _build_app()
-        accounts = app.get_accounts()
         if username:
-            accounts = [a for a in accounts if a["username"].lower() == username.lower()]
-        for a in accounts:
-            app.remove_account(a)
-        _save_cache(cache)
-        # If no accounts remain, clear the cache row entirely
-        if not app.get_accounts():
-            _db.delete_setting(TOKEN_CACHE_KEY)
+            _db.delete_ms_account(username)
+        else:
+            _db.delete_all_ms_accounts()
     except Exception:
         pass
 

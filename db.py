@@ -48,6 +48,14 @@ CREATE TABLE IF NOT EXISTS settings (
     value TEXT NOT NULL
 );
 
+CREATE TABLE IF NOT EXISTS ms_accounts (
+    username TEXT PRIMARY KEY,
+    home_account_id TEXT,
+    cache_blob TEXT NOT NULL DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT NOW(),
+    updated_at TIMESTAMPTZ DEFAULT NOW()
+);
+
 CREATE TABLE IF NOT EXISTS sent_log (
     id SERIAL PRIMARY KEY,
     contact_id INTEGER,
@@ -322,6 +330,46 @@ def all_settings() -> dict:
 def delete_setting(key: str):
     with get_conn() as c, c.cursor() as cur:
         cur.execute("DELETE FROM settings WHERE key=%s", (key,))
+
+
+# Microsoft accounts: one row per signed-in account, isolated cache blob
+def list_ms_accounts() -> list:
+    with get_conn() as c:
+        cur = _dict_cursor(c)
+        cur.execute("SELECT username, home_account_id FROM ms_accounts ORDER BY LOWER(username)")
+        return [dict(r) for r in cur.fetchall()]
+
+
+def get_ms_account_cache(username: str) -> str:
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT cache_blob FROM ms_accounts WHERE username=%s", (username,))
+        row = cur.fetchone()
+        return row[0] if row else ""
+
+
+def upsert_ms_account(username: str, home_account_id: str, cache_blob: str):
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute(
+            """
+            INSERT INTO ms_accounts (username, home_account_id, cache_blob, updated_at)
+            VALUES (%s, %s, %s, NOW())
+            ON CONFLICT (username) DO UPDATE SET
+                home_account_id = EXCLUDED.home_account_id,
+                cache_blob = EXCLUDED.cache_blob,
+                updated_at = NOW()
+            """,
+            (username, home_account_id, cache_blob),
+        )
+
+
+def delete_ms_account(username: str):
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM ms_accounts WHERE username=%s", (username,))
+
+
+def delete_all_ms_accounts():
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM ms_accounts")
 
 
 # Log
