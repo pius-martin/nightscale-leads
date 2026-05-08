@@ -199,6 +199,37 @@ def render_template_text(text: str, contact: dict, html_safe: bool = False) -> s
     return _PLACEHOLDER_RE.sub(repl, text or "")
 
 
+def _template_placeholders(template: dict) -> list:
+    """Return the unique placeholder keys used in subject/body/footer of a template."""
+    parts = [
+        template.get("subject", "") or "",
+        template.get("body", "") or "",
+        template.get("footer", "") or "",
+    ]
+    keys = []
+    seen = set()
+    for text in parts:
+        for m in _PLACEHOLDER_RE.finditer(text):
+            key = m.group(1).strip().lower()
+            if key and key not in seen:
+                seen.add(key)
+                keys.append(key)
+    return keys
+
+
+def _contact_missing_vars(contact: dict, placeholders: list) -> list:
+    """Return the placeholder keys that are empty on the given contact."""
+    missing = []
+    for key in placeholders:
+        value = contact.get(key)
+        # Treat synthetic 'name' as filled when first or last name exists.
+        if key == "name" and not value:
+            value = (contact.get("first_name") or "") + (contact.get("last_name") or "")
+        if not str(value or "").strip():
+            missing.append(key)
+    return missing
+
+
 @app.route("/health")
 def health():
     return {"ok": True}
@@ -609,6 +640,8 @@ def send_view():
 
     previews = []
     new_count = 0
+    sendable_new_count = 0
+    sendable_total_count = 0
     incomplete_count = 0
     missing_variants = set()
     for c in contacts_for_art:
@@ -624,9 +657,14 @@ def send_view():
             new_count += 1
         subject = render_template_text(template["subject"], c)
         body = _compose_body(template["body"], template.get("footer", ""), signature, c)
-        incomplete = MISSING_MARKER in subject or MISSING_MARKER in body
+        missing_vars = _contact_missing_vars(c, _template_placeholders(template))
+        incomplete = bool(missing_vars)
         if incomplete:
             incomplete_count += 1
+        else:
+            sendable_total_count += 1
+            if not sent_before:
+                sendable_new_count += 1
         previews.append({
             "contact": c,
             "variant": variant,
@@ -635,6 +673,7 @@ def send_view():
             "body": body,
             "already_sent": sent_before,
             "incomplete": incomplete,
+            "missing_vars": missing_vars,
         })
     log = db.list_log(50)
     return render_template(
@@ -645,6 +684,8 @@ def send_view():
         previews=previews,
         new_count=new_count,
         total_count=len(previews),
+        sendable_new_count=sendable_new_count,
+        sendable_total_count=sendable_total_count,
         incomplete_count=incomplete_count,
         missing_variants=sorted(missing_variants),
         marker=MISSING_MARKER,
@@ -674,7 +715,7 @@ def send_run():
     sender_name = _sender_name_for(account)
     sender_email = _sender_email_for(account)
     signature = _signature_for_account(account)
-    sent, failed, skipped = 0, 0, 0
+    sent, failed, skipped, incomplete = 0, 0, 0, 0
     for c in contacts_for_art:
         if mode == "new" and c["id"] in already:
             skipped += 1
@@ -686,6 +727,14 @@ def send_run():
         if not template:
             failed += 1
             db.log_send(c["id"], c["email"], art, "", "failed", f"no template for variant {variant}")
+            continue
+        missing_vars = _contact_missing_vars(c, _template_placeholders(template))
+        if missing_vars:
+            incomplete += 1
+            db.log_send(
+                c["id"], c["email"], art, "", "skipped",
+                f"missing variables: {', '.join(missing_vars)}",
+            )
             continue
         subject = render_template_text(template["subject"], c)
         inner = _compose_body(template["body"], template.get("footer", ""), signature, c)
@@ -707,9 +756,11 @@ def send_run():
     parts = [f"Sent {sent}"]
     if skipped:
         parts.append(f"skipped {skipped} already-sent")
+    if incomplete:
+        parts.append(f"skipped {incomplete} with missing variables")
     if failed:
         parts.append(f"{failed} failed")
-    flash(", ".join(parts) + ".", "success" if failed == 0 else "error")
+    flash(", ".join(parts) + ".", "success" if failed == 0 and incomplete == 0 else "error")
     return redirect(url_for("send_view", art=art))
 
 

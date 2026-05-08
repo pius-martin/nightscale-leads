@@ -69,7 +69,7 @@
 
                 {% if incomplete_count %}
                 <div class="banner warn" style="margin-top:0">
-                    <span><strong>{{ incomplete_count }}</strong> contact{{ '' if incomplete_count == 1 else 's' }} {{ 'has' if incomplete_count == 1 else 'have' }} placeholders rendering as <code class="mono">{{ marker }}</code>. Review them below or fix the contact data before sending.</span>
+                    <span><strong>{{ incomplete_count }}</strong> contact{{ '' if incomplete_count == 1 else 's' }} {{ 'is' if incomplete_count == 1 else 'are' }} missing variables required by the template and <strong>will be skipped</strong>. Fix the contact data to include them.</span>
                 </div>
                 {% endif %}
 
@@ -82,20 +82,22 @@
                         </select>
                     </label>
 
-                    {% if new_count > 0 %}
-                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Send {{ new_count }} new email{{ '' if new_count == 1 else 's' }}?');">
+                    {% if sendable_new_count > 0 %}
+                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Send {{ sendable_new_count }} new email{{ '' if sendable_new_count == 1 else 's' }}?');">
                         <input type="hidden" name="art" value="{{ selected }}">
                         <input type="hidden" name="mode" value="new">
                         <input type="hidden" name="account" value="">
-                        <button class="btn btn-primary" type="submit">Send to {{ new_count }} new</button>
+                        <button class="btn btn-primary" type="submit">Send to {{ sendable_new_count }} new</button>
                     </form>
                     {% endif %}
-                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Re-send to ALL {{ total_count }} recipient{{ '' if total_count == 1 else 's' }} (including duplicates)?');">
+                    {% if sendable_total_count > 0 %}
+                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Re-send to ALL {{ sendable_total_count }} recipient{{ '' if sendable_total_count == 1 else 's' }} (including duplicates)?');">
                         <input type="hidden" name="art" value="{{ selected }}">
                         <input type="hidden" name="mode" value="all">
                         <input type="hidden" name="account" value="">
-                        <button class="btn btn-ghost" type="submit">Send to all {{ total_count }}</button>
+                        <button class="btn btn-ghost" type="submit">Send to all {{ sendable_total_count }}</button>
                     </form>
+                    {% endif %}
                 </div>
                 {% endif %}
 
@@ -110,7 +112,7 @@
                                     &middot; {{ p.contact.first_name }} {{ p.contact.last_name }}
                                 {% endif %}
                                 <span class="badge dim" style="margin-left:8px">{{ p.template_variant }}</span>
-                                {% if p.incomplete %}<span class="badge err" style="margin-left:6px">incomplete</span>{% endif %}
+                                {% if p.incomplete %}<span class="badge err" style="margin-left:6px" title="Missing: {{ p.missing_vars|join(', ') }}">will be skipped — missing: {{ p.missing_vars|join(', ') }}</span>{% endif %}
                                 {% if p.already_sent %}<span class="badge dim" style="margin-left:6px">already sent</span>{% endif %}
                             </span>
                             <span class="mono muted">{{ p.contact.email }}</span>
