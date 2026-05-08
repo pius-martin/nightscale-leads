@@ -5,7 +5,7 @@
 <div class="page-header">
     <div>
         <h1>Send</h1>
-        <div class="subtitle">Preview, then send to all contacts of a type. The right template variant is picked per contact.</div>
+        <div class="subtitle">Pick a type and a template. Only contacts that have all variables required by the template are shown.</div>
     </div>
 </div>
 
@@ -42,38 +42,45 @@
                 </div>
             {% endif %}
 
-            {% if missing_variants %}
-                <div class="banner warn">
-                    <span>Missing template variant: {{ missing_variants|join(', ') }}. The other variant will be used as fallback.</span>
-                    <a class="btn btn-ghost btn-sm" href="{{ url_for('templates_view', art=selected, variant=missing_variants[0]) }}">Create</a>
-                </div>
-            {% endif %}
-
-            {% if not has_template %}
+            {% if not available_variants %}
                 <div class="empty">
                     <p>No template for "{{ selected }}".</p>
                     <a class="btn btn-primary" href="{{ url_for('templates_view', art=selected) }}">Create template</a>
                 </div>
-            {% elif not previews %}
-                <div class="empty"><p>No contacts of type "{{ selected }}" yet.</p></div>
             {% else %}
+                <div class="variant-tabs" style="display:flex; gap:8px; margin-bottom:14px">
+                    {% for v in ['personal', 'anonymous'] %}
+                        {% if v in available_variants %}
+                            <a class="btn btn-sm {% if v == selected_variant %}btn-primary{% else %}btn-ghost{% endif %}"
+                               href="{{ url_for('send_view', art=selected, variant=v) }}">{{ v }}</a>
+                        {% else %}
+                            <a class="btn btn-sm btn-ghost" style="opacity:.5"
+                               href="{{ url_for('templates_view', art=selected, variant=v) }}"
+                               title="Create {{ v }} template">{{ v }} (create)</a>
+                        {% endif %}
+                    {% endfor %}
+                </div>
+
+                {% if not previews and skipped_count == 0 %}
+                    <div class="empty"><p>No contacts of type "{{ selected }}" yet.</p></div>
+                {% else %}
                 {% set already_count = total_count - new_count %}
                 <div class="send-stats">
                     <div class="stat"><span class="stat-label">Total</span><span class="stat-value">{{ total_count }}</span></div>
                     <div class="stat"><span class="stat-label">New</span><span class="stat-value">{{ new_count }}</span></div>
                     <div class="stat"><span class="stat-label">Already sent</span><span class="stat-value dim">{{ already_count }}</span></div>
-                    {% if incomplete_count %}
-                    <div class="stat"><span class="stat-label">Incomplete</span><span class="stat-value" style="color:var(--warn)">{{ incomplete_count }}</span></div>
+                    {% if skipped_count %}
+                    <div class="stat"><span class="stat-label">Hidden</span><span class="stat-value dim">{{ skipped_count }}</span></div>
                     {% endif %}
                 </div>
 
-                {% if incomplete_count %}
+                {% if skipped_count %}
                 <div class="banner warn" style="margin-top:0">
-                    <span><strong>{{ incomplete_count }}</strong> contact{{ '' if incomplete_count == 1 else 's' }} {{ 'is' if incomplete_count == 1 else 'are' }} missing variables required by the template and <strong>will be skipped</strong>. Fix the contact data to include them.</span>
+                    <span><strong>{{ skipped_count }}</strong> contact{{ '' if skipped_count == 1 else 's' }} hidden because {{ 'it is' if skipped_count == 1 else 'they are' }} missing variables required by the <strong>{{ selected_variant }}</strong> template.</span>
                 </div>
                 {% endif %}
 
-                {% if ms_accounts %}
+                {% if ms_accounts and previews %}
                 <div class="send-actions" style="align-items:flex-end; gap:14px">
                     <label style="display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.07em; font-weight:500">
                         Send from
@@ -82,20 +89,22 @@
                         </select>
                     </label>
 
-                    {% if sendable_new_count > 0 %}
-                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Send {{ sendable_new_count }} new email{{ '' if sendable_new_count == 1 else 's' }}?');">
+                    {% if new_count > 0 %}
+                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Send {{ new_count }} new {{ selected_variant }} email{{ '' if new_count == 1 else 's' }}?');">
                         <input type="hidden" name="art" value="{{ selected }}">
+                        <input type="hidden" name="variant" value="{{ selected_variant }}">
                         <input type="hidden" name="mode" value="new">
                         <input type="hidden" name="account" value="">
-                        <button class="btn btn-primary" type="submit">Send to {{ sendable_new_count }} new</button>
+                        <button class="btn btn-primary" type="submit">Send to {{ new_count }} new</button>
                     </form>
                     {% endif %}
-                    {% if sendable_total_count > 0 %}
-                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Re-send to ALL {{ sendable_total_count }} recipient{{ '' if sendable_total_count == 1 else 's' }} (including duplicates)?');">
+                    {% if total_count > 0 %}
+                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Re-send to ALL {{ total_count }} recipient{{ '' if total_count == 1 else 's' }} (including duplicates)?');">
                         <input type="hidden" name="art" value="{{ selected }}">
+                        <input type="hidden" name="variant" value="{{ selected_variant }}">
                         <input type="hidden" name="mode" value="all">
                         <input type="hidden" name="account" value="">
-                        <button class="btn btn-ghost" type="submit">Send to all {{ sendable_total_count }}</button>
+                        <button class="btn btn-ghost" type="submit">Send to all {{ total_count }}</button>
                     </form>
                     {% endif %}
                 </div>
@@ -104,15 +113,14 @@
                 <h3 class="mt">Preview</h3>
                 <div class="previews">
                     {% for p in previews %}
-                    <details class="preview {% if p.already_sent %}sent{% endif %} {% if p.incomplete %}incomplete{% endif %}">
+                    <details class="preview {% if p.already_sent %}sent{% endif %}">
                         <summary>
                             <span>
                                 <strong>{{ p.contact.firma or '—' }}</strong>
                                 {% if p.contact.first_name or p.contact.last_name %}
                                     &middot; {{ p.contact.first_name }} {{ p.contact.last_name }}
                                 {% endif %}
-                                <span class="badge dim" style="margin-left:8px">{{ p.template_variant }}</span>
-                                {% if p.incomplete %}<span class="badge err" style="margin-left:6px" title="Missing: {{ p.missing_vars|join(', ') }}">will be skipped — missing: {{ p.missing_vars|join(', ') }}</span>{% endif %}
+                                <span class="badge dim" style="margin-left:8px">{{ selected_variant }}</span>
                                 {% if p.already_sent %}<span class="badge dim" style="margin-left:6px">already sent</span>{% endif %}
                             </span>
                             <span class="mono muted">{{ p.contact.email }}</span>
@@ -125,6 +133,7 @@
                     </details>
                     {% endfor %}
                 </div>
+                {% endif %}
             {% endif %}
         </div>
 

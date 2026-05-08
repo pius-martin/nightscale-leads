@@ -624,71 +624,59 @@ def _wrap_email_html(inner_html: str) -> str:
 
 
 # ---------- Send ----------
-def _contact_variant(c: dict) -> str:
-    has_name = bool((c.get("first_name") or "").strip() or (c.get("last_name") or "").strip())
-    return "personal" if has_name else "anonymous"
-
-
 @app.route("/send", methods=["GET"])
 def send_view():
     arten = db.list_arten()
     selected = request.args.get("art") or (arten[0] if arten else "")
     variants_for_art = db.get_templates_for_art(selected) if selected else {}
+    available_variants = [v for v in db.VARIANTS if v in variants_for_art]
+    requested_variant = request.args.get("variant", "").strip().lower()
+    if requested_variant in available_variants:
+        selected_variant = requested_variant
+    elif available_variants:
+        selected_variant = available_variants[0]
+    else:
+        selected_variant = ""
+    template = variants_for_art.get(selected_variant) if selected_variant else None
     contacts_for_art = db.list_contacts(art=selected) if selected else []
     already = db.sent_contact_ids(selected) if selected else set()
     signature = db.get_setting("email_signature", "")
 
     previews = []
+    skipped_count = 0
     new_count = 0
-    sendable_new_count = 0
-    sendable_total_count = 0
-    incomplete_count = 0
-    missing_variants = set()
+    total_count = 0
+    placeholders = _template_placeholders(template) if template else []
     for c in contacts_for_art:
-        variant = _contact_variant(c)
-        template = variants_for_art.get(variant) or variants_for_art.get(
-            "personal" if variant == "anonymous" else "anonymous"
-        )
-        if not template:
-            missing_variants.add(variant)
-            continue
+        if template:
+            missing_vars = _contact_missing_vars(c, placeholders)
+            if missing_vars:
+                skipped_count += 1
+                continue
         sent_before = c["id"] in already
+        total_count += 1
         if not sent_before:
             new_count += 1
-        subject = render_template_text(template["subject"], c)
-        body = _compose_body(template["body"], template.get("footer", ""), signature, c)
-        missing_vars = _contact_missing_vars(c, _template_placeholders(template))
-        incomplete = bool(missing_vars)
-        if incomplete:
-            incomplete_count += 1
-        else:
-            sendable_total_count += 1
-            if not sent_before:
-                sendable_new_count += 1
+        subject = render_template_text(template["subject"], c) if template else ""
+        body = _compose_body(template["body"], template.get("footer", ""), signature, c) if template else ""
         previews.append({
             "contact": c,
-            "variant": variant,
-            "template_variant": template["variant"],
             "subject": subject,
             "body": body,
             "already_sent": sent_before,
-            "incomplete": incomplete,
-            "missing_vars": missing_vars,
         })
     log = db.list_log(50)
     return render_template(
         "send.html",
         arten=arten,
         selected=selected,
-        has_template=bool(variants_for_art),
+        available_variants=available_variants,
+        selected_variant=selected_variant,
+        has_template=bool(template),
         previews=previews,
         new_count=new_count,
-        total_count=len(previews),
-        sendable_new_count=sendable_new_count,
-        sendable_total_count=sendable_total_count,
-        incomplete_count=incomplete_count,
-        missing_variants=sorted(missing_variants),
-        marker=MISSING_MARKER,
+        total_count=total_count,
+        skipped_count=skipped_count,
         log=log,
     )
 
@@ -696,20 +684,25 @@ def send_view():
 @app.route("/send/run", methods=["POST"])
 def send_run():
     art = request.form.get("art", "").strip()
+    variant = request.form.get("variant", "").strip().lower()
     mode = request.form.get("mode", "new")  # 'new' or 'all'
     account = request.form.get("account", "").strip() or None
     if not art:
         flash("No type selected.", "error")
         return redirect(url_for("send_view"))
+    if variant not in db.VARIANTS:
+        flash("Invalid template selection.", "error")
+        return redirect(url_for("send_view", art=art))
     if not graph_mail.list_accounts():
         flash("No Microsoft account connected.", "error")
         return redirect(url_for("auth_view"))
 
-    variants_for_art = db.get_templates_for_art(art)
-    if not variants_for_art:
-        flash("No template for this type.", "error")
-        return redirect(url_for("send_view", art=art))
+    template = db.get_template(art, variant)
+    if not template:
+        flash(f"No {variant} template for this type.", "error")
+        return redirect(url_for("send_view", art=art, variant=variant))
 
+    placeholders = _template_placeholders(template)
     contacts_for_art = db.list_contacts(art=art)
     already = db.sent_contact_ids(art) if mode == "new" else set()
     sender_name = _sender_name_for(account)
@@ -717,24 +710,12 @@ def send_run():
     signature = _signature_for_account(account)
     sent, failed, skipped, incomplete = 0, 0, 0, 0
     for c in contacts_for_art:
-        if mode == "new" and c["id"] in already:
-            skipped += 1
-            continue
-        variant = _contact_variant(c)
-        template = variants_for_art.get(variant) or variants_for_art.get(
-            "personal" if variant == "anonymous" else "anonymous"
-        )
-        if not template:
-            failed += 1
-            db.log_send(c["id"], c["email"], art, "", "failed", f"no template for variant {variant}")
-            continue
-        missing_vars = _contact_missing_vars(c, _template_placeholders(template))
+        missing_vars = _contact_missing_vars(c, placeholders)
         if missing_vars:
             incomplete += 1
-            db.log_send(
-                c["id"], c["email"], art, "", "skipped",
-                f"missing variables: {', '.join(missing_vars)}",
-            )
+            continue
+        if mode == "new" and c["id"] in already:
+            skipped += 1
             continue
         subject = render_template_text(template["subject"], c)
         inner = _compose_body(template["body"], template.get("footer", ""), signature, c)
@@ -757,11 +738,11 @@ def send_run():
     if skipped:
         parts.append(f"skipped {skipped} already-sent")
     if incomplete:
-        parts.append(f"skipped {incomplete} with missing variables")
+        parts.append(f"skipped {incomplete} without required variables")
     if failed:
         parts.append(f"{failed} failed")
-    flash(", ".join(parts) + ".", "success" if failed == 0 and incomplete == 0 else "error")
-    return redirect(url_for("send_view", art=art))
+    flash(", ".join(parts) + ".", "success" if failed == 0 else "error")
+    return redirect(url_for("send_view", art=art, variant=variant))
 
 
 # ---------- Settings ----------
