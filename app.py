@@ -593,6 +593,9 @@ def _wrap_email_html(inner_html: str) -> str:
 
 
 # ---------- Send ----------
+SEND_FILTERS = ("all", "personal", "anonymous")
+
+
 def _contact_variant(c: dict) -> str:
     has_name = bool((c.get("first_name") or "").strip() or (c.get("last_name") or "").strip())
     return "personal" if has_name else "anonymous"
@@ -602,6 +605,9 @@ def _contact_variant(c: dict) -> str:
 def send_view():
     arten = db.list_arten()
     selected = request.args.get("art") or (arten[0] if arten else "")
+    variant_filter = request.args.get("variant", "all")
+    if variant_filter not in SEND_FILTERS:
+        variant_filter = "all"
     variants_for_art = db.get_templates_for_art(selected) if selected else {}
     contacts_for_art = db.list_contacts(art=selected) if selected else []
     already = db.sent_contact_ids(selected) if selected else set()
@@ -611,6 +617,8 @@ def send_view():
     new_count = 0
     incomplete_count = 0
     missing_variants = set()
+    variant_totals = {"all": 0, "personal": 0, "anonymous": 0}
+    variant_new = {"all": 0, "personal": 0, "anonymous": 0}
     for c in contacts_for_art:
         variant = _contact_variant(c)
         template = variants_for_art.get(variant) or variants_for_art.get(
@@ -620,6 +628,13 @@ def send_view():
             missing_variants.add(variant)
             continue
         sent_before = c["id"] in already
+        variant_totals["all"] += 1
+        variant_totals[variant] += 1
+        if not sent_before:
+            variant_new["all"] += 1
+            variant_new[variant] += 1
+        if variant_filter != "all" and variant != variant_filter:
+            continue
         if not sent_before:
             new_count += 1
         subject = render_template_text(template["subject"], c)
@@ -641,6 +656,9 @@ def send_view():
         "send.html",
         arten=arten,
         selected=selected,
+        variant_filter=variant_filter,
+        variant_totals=variant_totals,
+        variant_new=variant_new,
         has_template=bool(variants_for_art),
         previews=previews,
         new_count=new_count,
@@ -656,6 +674,9 @@ def send_view():
 def send_run():
     art = request.form.get("art", "").strip()
     mode = request.form.get("mode", "new")  # 'new' or 'all'
+    variant_filter = request.form.get("variant", "all")
+    if variant_filter not in SEND_FILTERS:
+        variant_filter = "all"
     account = request.form.get("account", "").strip() or None
     if not art:
         flash("No type selected.", "error")
@@ -676,10 +697,12 @@ def send_run():
     signature = _signature_for_account(account)
     sent, failed, skipped = 0, 0, 0
     for c in contacts_for_art:
+        variant = _contact_variant(c)
+        if variant_filter != "all" and variant != variant_filter:
+            continue
         if mode == "new" and c["id"] in already:
             skipped += 1
             continue
-        variant = _contact_variant(c)
         template = variants_for_art.get(variant) or variants_for_art.get(
             "personal" if variant == "anonymous" else "anonymous"
         )
@@ -710,7 +733,7 @@ def send_run():
     if failed:
         parts.append(f"{failed} failed")
     flash(", ".join(parts) + ".", "success" if failed == 0 else "error")
-    return redirect(url_for("send_view", art=art))
+    return redirect(url_for("send_view", art=art, variant=variant_filter))
 
 
 # ---------- Settings ----------

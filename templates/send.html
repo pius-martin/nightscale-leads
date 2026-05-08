@@ -23,7 +23,7 @@
         <ul class="sidebar-list">
             {% for a in arten %}
             <li>
-                <a href="{{ url_for('send_view', art=a) }}" class="{% if a == selected %}active{% endif %}">{{ a }}</a>
+                <a href="{{ url_for('send_view', art=a, variant=variant_filter) }}" class="{% if a == selected %}active{% endif %}">{{ a }}</a>
             </li>
             {% endfor %}
         </ul>
@@ -54,9 +54,24 @@
                     <p>No template for "{{ selected }}".</p>
                     <a class="btn btn-primary" href="{{ url_for('templates_view', art=selected) }}">Create template</a>
                 </div>
-            {% elif not previews %}
-                <div class="empty"><p>No contacts of type "{{ selected }}" yet.</p></div>
             {% else %}
+                <div class="tab-bar" style="margin-top:0; margin-bottom:18px">
+                    {% for f, label in [('all','All'), ('personal','Personal'), ('anonymous','Anonymous')] %}
+                    <a class="tab {% if variant_filter == f %}active{% endif %}"
+                       href="{{ url_for('send_view', art=selected, variant=f) }}">
+                        {{ label }} <span class="muted" style="font-variant-numeric:tabular-nums">{{ variant_totals[f] }}</span>
+                    </a>
+                    {% endfor %}
+                </div>
+
+                {% if not previews %}
+                <div class="empty">
+                    <p>
+                        {% if variant_filter == 'all' %}No contacts of type "{{ selected }}" yet.
+                        {% else %}No {{ variant_filter }} contacts of type "{{ selected }}".{% endif %}
+                    </p>
+                </div>
+                {% else %}
                 {% set already_count = total_count - new_count %}
                 <div class="send-stats">
                     <div class="stat"><span class="stat-label">Total</span><span class="stat-value">{{ total_count }}</span></div>
@@ -82,19 +97,23 @@
                         </select>
                     </label>
 
+                    {% set scope_label = 'new ' + variant_filter if variant_filter != 'all' else 'new' %}
+                    {% set scope_all = variant_filter + ' contacts' if variant_filter != 'all' else 'recipients' %}
                     {% if new_count > 0 %}
-                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Send {{ new_count }} new email{{ '' if new_count == 1 else 's' }}?');">
+                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Send {{ new_count }} new {{ variant_filter if variant_filter != 'all' else '' }} email{{ '' if new_count == 1 else 's' }}?');">
                         <input type="hidden" name="art" value="{{ selected }}">
                         <input type="hidden" name="mode" value="new">
+                        <input type="hidden" name="variant" value="{{ variant_filter }}">
                         <input type="hidden" name="account" value="">
-                        <button class="btn btn-primary" type="submit">Send to {{ new_count }} new</button>
+                        <button class="btn btn-primary" type="submit">Send to {{ new_count }} {{ scope_label }}</button>
                     </form>
                     {% endif %}
-                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Re-send to ALL {{ total_count }} recipient{{ '' if total_count == 1 else 's' }} (including duplicates)?');">
+                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Re-send to ALL {{ total_count }} {{ scope_all }} (including duplicates)?');">
                         <input type="hidden" name="art" value="{{ selected }}">
                         <input type="hidden" name="mode" value="all">
+                        <input type="hidden" name="variant" value="{{ variant_filter }}">
                         <input type="hidden" name="account" value="">
-                        <button class="btn btn-ghost" type="submit">Send to all {{ total_count }}</button>
+                        <button class="btn btn-ghost" type="submit">Send to all {{ total_count }}{% if variant_filter != 'all' %} {{ variant_filter }}{% endif %}</button>
                     </form>
                 </div>
                 {% endif %}
@@ -123,6 +142,7 @@
                     </details>
                     {% endfor %}
                 </div>
+                {% endif %}
             {% endif %}
         </div>
 
