@@ -28,7 +28,7 @@
                 <a class="btn btn-primary btn-sm" href="{{ url_for('auth_view') }}">Connect Microsoft</a>
             {% endif %}
             <form action="{{ url_for('logout') }}" method="post" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                <button class="btn btn-ghost btn-icon" type="submit" title="Sign out">⏻</button>
+                <button class="btn btn-ghost btn-icon" type="submit" title="Sign out" aria-label="Sign out of the app">⏻</button>
             </form>
         </div>
     </header>
@@ -36,9 +36,11 @@
     <main class="container{% block container_class %}{% endblock %}">
         {% with messages = get_flashed_messages(with_categories=true) %}
             {% if messages %}
+                <div class="flashes" aria-live="polite">
                 {% for cat, msg in messages %}
-                    <div class="flash {{ cat }}">{{ msg }}</div>
+                    <div class="flash {{ cat }}"{% if cat == 'error' %} role="alert"{% endif %}>{{ msg }}</div>
                 {% endfor %}
+                </div>
             {% endif %}
         {% endwith %}
         {% block content %}{% endblock %}

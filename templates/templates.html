@@ -129,9 +129,9 @@
             <form action="{{ url_for('template_test_send') }}" method="post" class="row" data-loading="Sending test…" style="gap:10px; align-items:flex-end"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="art" value="{{ selected }}">
                 <input type="hidden" name="variant" value="{{ variant }}">
-                <label style="flex:1; min-width:240px; display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.07em; font-weight:500">
+                <label class="field flex-1" style="min-width:240px">
                     Send to / from
-                    <select name="account" required style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:9px 12px; border-radius:6px; font-size:13.5px; text-transform:none; letter-spacing:normal; font-weight:400">
+                    <select name="account" required class="select-inline">
                         {% for a in ms_accounts %}<option value="{{ a.username }}">{{ a.username }}</option>{% endfor %}
                     </select>
                 </label>

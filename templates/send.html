@@ -98,9 +98,9 @@
                 <form action="{{ url_for('send_run') }}" method="post" class="send-actions" id="send-form" data-loading="Starting…" style="align-items:flex-end; gap:14px">
                     <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                     <input type="hidden" name="art" value="{{ selected }}">
-                    <label style="display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.07em; font-weight:500">
+                    <label class="field">
                         Send from
-                        <select name="account" required style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:9px 12px; border-radius:6px; font-size:13.5px; min-width:240px; text-transform:none; letter-spacing:normal; font-weight:400">
+                        <select name="account" required class="select-inline" style="min-width:240px">
                             {% for a in ms_accounts %}<option value="{{ a.username }}">{{ a.username }}</option>{% endfor %}
                         </select>
                     </label>
@@ -164,12 +164,13 @@
         <div class="card mt">
             <div class="card-header"><h2>Send log</h2></div>
             {% if log %}
+            <div class="table-wrap">
             <table class="table">
                 <thead><tr><th>Time</th><th>To</th><th>Type</th><th>Subject</th><th>Status</th></tr></thead>
                 <tbody>
                     {% for l in log %}
                     <tr>
-                        <td class="mono muted">{{ l.sent_at.strftime('%Y-%m-%d %H:%M') if l.sent_at else '' }}</td>
+                        <td class="mono muted" {% if l.sent_at %}data-ts="{{ l.sent_at.isoformat() }}"{% endif %}>{{ l.sent_at.strftime('%Y-%m-%d %H:%M') if l.sent_at else '' }}</td>
                         <td class="mono">{{ l.contact_email }}</td>
                         <td><span class="tag">{{ l.art }}</span></td>
                         <td>{{ l.subject }}</td>
@@ -181,6 +182,7 @@
                     {% endfor %}
                 </tbody>
             </table>
+            </div>
             {% else %}
                 <div class="empty"><p>Nothing sent yet.</p></div>
             {% endif %}
