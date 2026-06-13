@@ -240,6 +240,31 @@ def index():
     return redirect(url_for("contacts"))
 
 
+_EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
+
+
+def _valid_email(value: str) -> bool:
+    return bool(_EMAIL_RE.match((value or "").strip()))
+
+
+def _validate_contact_form(form) -> dict:
+    """Returns {field: message} for the add/edit contact forms."""
+    errors = {}
+    email = (form.get("email") or "").strip()
+    if not email:
+        errors["email"] = "Email is required."
+    elif not _valid_email(email):
+        errors["email"] = "That doesn't look like a valid email address."
+    if not (form.get("art") or "").strip():
+        errors["art"] = "Pick a type."
+    firma = (form.get("firma") or "").strip()
+    first = (form.get("first_name") or "").strip()
+    last = (form.get("last_name") or "").strip()
+    if not firma and not first and not last:
+        errors["firma"] = "Provide at least a company or a name."
+    return errors
+
+
 _HEADER_ALIASES = {
     "firma": {"firma", "company", "firmenname", "organization", "organisation"},
     "first_name": {"first_name", "firstname", "first", "vorname"},
@@ -315,6 +340,10 @@ def _import_rows(rows: list[dict]) -> tuple[int, int, list[str]]:
             skipped += 1
             errors.append(f"row {i}: missing type")
             continue
+        if not _valid_email(email):
+            skipped += 1
+            errors.append(f"row {i}: invalid email '{email}'")
+            continue
         if not firma and not r.get("first_name") and not r.get("last_name"):
             skipped += 1
             errors.append(f"row {i}: needs at least company or a name")
@@ -339,26 +368,31 @@ def _import_rows(rows: list[dict]) -> tuple[int, int, list[str]]:
 def contacts():
     arten = db.list_arten()
     if request.method == "POST":
+        form_errors = _validate_contact_form(request.form)
+        if form_errors:
+            items = db.list_contacts()
+            return render_template(
+                "contacts.html", contacts=items, arten=arten,
+                form=request.form, form_errors=form_errors,
+            )
         art = request.form.get("art", "").strip()
         if art and art not in arten:
             db.add_art(art)
-        firma = request.form.get("firma", "").strip()
-        first_name = request.form.get("first_name", "").strip()
-        last_name = request.form.get("last_name", "").strip()
-        if not firma and not first_name and not last_name:
-            flash("Provide at least a company or a name.", "error")
-            return redirect(url_for("contacts"))
         db.add_contact(
-            firma=firma,
-            first_name=first_name,
-            last_name=last_name,
+            firma=request.form.get("firma", "").strip(),
+            first_name=request.form.get("first_name", "").strip(),
+            last_name=request.form.get("last_name", "").strip(),
             email=request.form.get("email", ""),
             art=art,
             notes=request.form.get("notes", ""),
         )
+        flash("Contact added.", "success")
         return redirect(url_for("contacts"))
     items = db.list_contacts()
-    return render_template("contacts.html", contacts=items, arten=arten)
+    import_report = session.pop("import_report", None)
+    return render_template(
+        "contacts.html", contacts=items, arten=arten, import_report=import_report,
+    )
 
 
 @app.route("/contacts/import", methods=["POST"])
@@ -381,11 +415,17 @@ def contacts_import():
         flash(f"Could not parse file: {e}", "error")
         return redirect(url_for("contacts"))
     added, skipped, errors = _import_rows(rows)
+    log.info("Import: %s added, %s skipped (%s)", added, skipped, file.filename)
     msg = f"Imported {added} contact{'' if added == 1 else 's'}"
     if skipped:
-        msg += f", skipped {skipped}"
-        if errors:
-            msg += " (" + "; ".join(errors[:3]) + ("…" if len(errors) > 3 else "") + ")"
+        msg += f", skipped {skipped} — see the import report below"
+        # Session cookies have a ~4 KB limit; cap the row-error list.
+        session["import_report"] = {
+            "added": added,
+            "skipped": skipped,
+            "errors": errors[:50],
+            "truncated": max(0, len(errors) - 50),
+        }
     flash(msg + ".", "success" if skipped == 0 else "error")
     return redirect(url_for("contacts"))
 
@@ -395,7 +435,18 @@ def edit_contact(cid):
     contact = db.get_contact(cid)
     if not contact:
         return redirect(url_for("contacts"))
+    arten = db.list_arten()
     if request.method == "POST":
+        form_errors = _validate_contact_form(request.form)
+        if form_errors:
+            # Re-render with the submitted (unsaved) values so nothing is lost
+            submitted = dict(contact)
+            for k in ("firma", "first_name", "last_name", "email", "art", "notes"):
+                submitted[k] = request.form.get(k, "")
+            return render_template(
+                "edit_contact.html", contact=submitted, arten=arten,
+                form_errors=form_errors,
+            )
         db.update_contact(
             cid,
             firma=request.form.get("firma", ""),
@@ -405,8 +456,8 @@ def edit_contact(cid):
             art=request.form.get("art", ""),
             notes=request.form.get("notes", ""),
         )
+        flash("Contact saved.", "success")
         return redirect(url_for("contacts"))
-    arten = db.list_arten()
     return render_template("edit_contact.html", contact=contact, arten=arten)
 
 
@@ -756,6 +807,10 @@ def settings_account():
     if not username:
         flash("Missing account.", "error")
         return redirect(url_for("settings_view"))
+    sender_email = request.form.get("sender_email", "").strip()
+    if sender_email and not _valid_email(sender_email):
+        flash(f"'{sender_email}' is not a valid sender email. Nothing was saved.", "error")
+        return redirect(url_for("settings_view") + f"#acc-{username}")
     db.set_setting(f"sender_name_{username}", request.form.get("sender_name", "").strip())
     db.set_setting(f"sender_email_{username}", request.form.get("sender_email", "").strip())
     db.set_setting(f"email_signature_{username}", request.form.get("email_signature", ""))

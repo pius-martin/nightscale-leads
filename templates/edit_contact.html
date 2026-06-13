@@ -10,7 +10,9 @@
 <div class="card">
     <form method="post" class="form">
         <label>Company
-            <input type="text" name="firma" value="{{ contact.firma }}">
+            <input type="text" name="firma" value="{{ contact.firma }}"
+                   class="{{ 'invalid' if form_errors and 'firma' in form_errors }}">
+            {% if form_errors and form_errors.firma %}<span class="field-error">{{ form_errors.firma }}</span>{% endif %}
         </label>
         <div class="row" style="gap:14px">
             <label style="flex:1; min-width:180px">First name
@@ -21,7 +23,9 @@
             </label>
         </div>
         <label>Email
-            <input type="email" name="email" value="{{ contact.email }}" required>
+            <input type="email" name="email" value="{{ contact.email }}" required
+                   class="{{ 'invalid' if form_errors and 'email' in form_errors }}">
+            {% if form_errors and form_errors.email %}<span class="field-error">{{ form_errors.email }}</span>{% endif %}
         </label>
         <label>Type
             <select name="art" required>

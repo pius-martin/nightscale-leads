@@ -21,29 +21,41 @@
     {% else %}
     <form method="post" class="form">
         <label>Company
-            <input type="text" name="firma" autocomplete="off" placeholder="Acme Inc.">
-            <span class="hint">Required when there is no person name.</span>
+            <input type="text" name="firma" autocomplete="off" placeholder="Acme Inc."
+                   value="{{ form.firma if form else '' }}"
+                   class="{{ 'invalid' if form_errors and 'firma' in form_errors }}">
+            {% if form_errors and form_errors.firma %}
+                <span class="field-error">{{ form_errors.firma }}</span>
+            {% else %}
+                <span class="hint">Required when there is no person name.</span>
+            {% endif %}
         </label>
         <div class="row" style="gap:14px">
             <label style="flex:1; min-width:180px">First name
-                <input type="text" name="first_name" autocomplete="off" placeholder="Jane">
+                <input type="text" name="first_name" autocomplete="off" placeholder="Jane"
+                       value="{{ form.first_name if form else '' }}">
             </label>
             <label style="flex:1; min-width:180px">Last name
-                <input type="text" name="last_name" autocomplete="off" placeholder="Doe">
+                <input type="text" name="last_name" autocomplete="off" placeholder="Doe"
+                       value="{{ form.last_name if form else '' }}">
             </label>
         </div>
         <div class="row" style="gap:14px">
             <label style="flex:1; min-width:200px">Email
-                <input type="email" name="email" required autocomplete="off" placeholder="jane@acme.com">
+                <input type="email" name="email" required autocomplete="off" placeholder="jane@acme.com"
+                       value="{{ form.email if form else '' }}"
+                       class="{{ 'invalid' if form_errors and 'email' in form_errors }}">
+                {% if form_errors and form_errors.email %}<span class="field-error">{{ form_errors.email }}</span>{% endif %}
             </label>
             <label style="flex:1; min-width:180px">Type
                 <select name="art" required>
-                    {% for a in arten %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+                    {% for a in arten %}<option value="{{ a }}" {% if form and form.art == a %}selected{% endif %}>{{ a }}</option>{% endfor %}
                 </select>
+                {% if form_errors and form_errors.art %}<span class="field-error">{{ form_errors.art }}</span>{% endif %}
             </label>
         </div>
         <label>Notes
-            <textarea name="notes" rows="2" placeholder="Optional"></textarea>
+            <textarea name="notes" rows="2" placeholder="Optional">{{ form.notes if form else '' }}</textarea>
         </label>
         <div class="row">
             <button type="submit" class="btn btn-primary">Add contact</button>
@@ -51,6 +63,24 @@
     </form>
     {% endif %}
 </div>
+
+{% if import_report %}
+<div class="card mt">
+    <div class="card-header">
+        <h2>Import report</h2>
+        <span class="badge {{ 'ok' if not import_report.skipped else 'err' }}">{{ import_report.added }} added · {{ import_report.skipped }} skipped</span>
+    </div>
+    {% if import_report.errors %}
+    <details class="import-report" open>
+        <summary>Skipped rows ({{ import_report.skipped }})</summary>
+        <ul class="import-errors mono">
+            {% for e in import_report.errors %}<li>{{ e }}</li>{% endfor %}
+            {% if import_report.truncated %}<li class="muted">… and {{ import_report.truncated }} more (fix the rows above and re-import)</li>{% endif %}
+        </ul>
+    </details>
+    {% endif %}
+</div>
+{% endif %}
 
 <div class="card mt">
     <div class="card-header">
