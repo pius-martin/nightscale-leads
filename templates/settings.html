@@ -27,13 +27,13 @@
     <div class="card{% if not loop.first %} mt{% endif %}" id="acc-{{ a.username }}">
         <div class="card-header">
             <h2>{{ a.username }}</h2>
-            <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')">
+            <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="username" value="{{ a.username }}">
                 <input type="hidden" name="from" value="settings">
                 <button class="btn btn-danger btn-sm" type="submit">Disconnect</button>
             </form>
         </div>
-        <form action="{{ url_for('settings_account') }}" method="post" class="form" id="acc-form-{{ loop.index0 }}">
+        <form action="{{ url_for('settings_account') }}" method="post" class="form" id="acc-form-{{ loop.index0 }}"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
             <input type="hidden" name="username" value="{{ a.username }}">
             <label>Sender name (display)
                 <input type="text" name="sender_name" value="{{ s.get('sender_name', '') }}" placeholder="e.g. Pius Martin · Nightscale">

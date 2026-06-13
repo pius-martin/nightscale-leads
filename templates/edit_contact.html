@@ -8,7 +8,7 @@
 </div>
 
 <div class="card">
-    <form method="post" class="form">
+    <form method="post" class="form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <label>Company
             <input type="text" name="firma" value="{{ contact.firma }}"
                    class="{{ 'invalid' if form_errors and 'firma' in form_errors }}">

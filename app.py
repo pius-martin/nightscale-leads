@@ -5,6 +5,7 @@ import logging
 import os
 import random
 import re
+import secrets
 import threading
 from functools import wraps
 from urllib.parse import urlparse
@@ -84,6 +85,32 @@ def _ensure_db():
     return None
 
 
+def _csrf_token() -> str:
+    token = session.get("_csrf")
+    if not token:
+        token = secrets.token_urlsafe(32)
+        session["_csrf"] = token
+    return token
+
+
+def _check_csrf():
+    """Validate the CSRF token on every POST. Returns a response on failure."""
+    submitted = request.form.get("csrf_token") or request.headers.get("X-CSRF-Token") or ""
+    expected = session.get("_csrf") or ""
+    if expected and submitted and hmac.compare_digest(submitted, expected):
+        return None
+    log.warning("CSRF check failed for %s %s", request.method, request.path)
+    if request.endpoint == "auth_start":
+        return jsonify({"error": "Session expired — reload the page and try again."}), 403
+    flash("Your session expired — please try that again.", "error")
+    ref = ""
+    if request.referrer:
+        p = urlparse(request.referrer)
+        if p.netloc == request.host:
+            ref = p.path + (("?" + p.query) if p.query else "")
+    return redirect(ref or url_for("contacts"))
+
+
 def login_required(f):
     @wraps(f)
     def wrapper(*args, **kwargs):
@@ -97,6 +124,10 @@ def login_required(f):
 
 @app.before_request
 def gate():
+    if request.method == "POST":
+        failure = _check_csrf()
+        if failure:
+            return failure
     # Allow static files and login page through without auth
     if request.endpoint in {"login", "static", "health"}:
         return None
@@ -173,6 +204,7 @@ def inject_globals():
         "account": account,
         "ms_accounts": accounts,
         "settings": settings,
+        "csrf_token": _csrf_token(),
     }
 
 
@@ -718,13 +750,20 @@ def send_view():
 def send_run():
     art = request.form.get("art", "").strip()
     mode = request.form.get("mode", "new")  # 'new' or 'all'
-    account = request.form.get("account", "").strip() or None
+    account = request.form.get("account", "").strip()
     if not art:
         flash("No type selected.", "error")
         return redirect(url_for("send_view"))
-    if not graph_mail.list_accounts():
+    if mode not in ("new", "all"):
+        flash("Invalid send mode.", "error")
+        return redirect(url_for("send_view", art=art))
+    connected = {a["username"] for a in graph_mail.list_accounts()}
+    if not connected:
         flash("No Microsoft account connected.", "error")
         return redirect(url_for("auth_view"))
+    if not account or account not in connected:
+        flash("Pick which account to send from.", "error")
+        return redirect(url_for("send_view", art=art))
 
     variants_for_art = db.get_templates_for_art(art)
     if not variants_for_art:

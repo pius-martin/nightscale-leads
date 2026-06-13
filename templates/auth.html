@@ -17,7 +17,7 @@
         {% for a in ms_accounts %}
         <div class="type-chip">
             <span class="type-chip-name">{{ a.username }}</span>
-            <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')">
+            <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="username" value="{{ a.username }}">
                 <button class="btn btn-danger btn-sm" type="submit">Disconnect</button>
             </form>
@@ -90,7 +90,10 @@
         errorEl.hidden = true;
         let data;
         try {
-            const r = await fetch('{{ url_for("auth_start") }}', {method: 'POST'});
+            const r = await fetch('{{ url_for("auth_start") }}', {
+                method: 'POST',
+                headers: {'X-CSRF-Token': document.querySelector('meta[name=csrf-token]').content},
+            });
             data = await r.json().catch(() => ({}));
             if (!r.ok) {
                 resetStart();

@@ -11,7 +11,7 @@
 
 <div class="card">
     <div class="card-header"><h2>Add new type</h2></div>
-    <form method="post" class="form">
+    <form method="post" class="form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="row" style="gap:10px; align-items:flex-end">
             <label style="flex:1; min-width:200px">Name
                 <input type="text" name="name" required autocomplete="off" placeholder="e.g. Investor">
@@ -33,7 +33,7 @@
                 <div class="row">
                     <a class="btn btn-ghost btn-sm" href="{{ url_for('templates_view', art=g.name) }}">Template</a>
                     <a class="btn btn-ghost btn-sm" href="{{ url_for('send_view', art=g.name) }}">Send</a>
-                    <form action="{{ url_for('delete_type') }}" method="post" onsubmit="return confirm('Delete this type? Contacts keep the label but you cannot pick it again.');">
+                    <form action="{{ url_for('delete_type') }}" method="post" onsubmit="return confirm('Delete this type? Contacts keep the label but you cannot pick it again.');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <input type="hidden" name="name" value="{{ g.name }}">
                         <button class="btn btn-danger btn-sm" type="submit">Delete</button>
                     </form>
