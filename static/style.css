@@ -471,6 +471,47 @@ mark.missing {
     padding: 0 3px;
 }
 
+/* Lead result filters */
+.lead-filters {
+    background: var(--bg-elev);
+    border: 1px solid var(--border);
+    border-radius: var(--radius-sm);
+    padding: 14px 16px;
+    margin-bottom: 14px;
+}
+.lead-filters-head {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.07em;
+    color: var(--text-dim);
+    margin-bottom: 12px;
+}
+.lead-filters-grid {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 16px;
+    align-items: flex-end;
+}
+.ff { display: flex; flex-direction: column; gap: 6px; }
+.ff-label {
+    font-size: 11px;
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    color: var(--text-mute);
+}
+.ff .input-inline { width: 130px; }
+.ff-checks { display: flex; flex-wrap: wrap; gap: 6px; }
+.ff-toggle {
+    flex-direction: row;
+    align-items: center;
+    gap: 7px;
+    font-size: 13px;
+    color: var(--text-dim);
+    cursor: pointer;
+}
+.ff-toggle input { accent-color: var(--accent); }
+#f-count { margin-top: 10px; }
+
 /* Background send progress */
 .send-progress {
     display: flex;

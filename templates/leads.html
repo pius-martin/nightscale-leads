@@ -92,16 +92,35 @@
             </label>
             <button type="submit" class="btn btn-primary" {% if not new_rows %}disabled{% endif %}>Import selected</button>
         </div>
-        <div class="chip-bar" id="lead-role-filter" role="group" aria-label="Filter by role" style="margin-bottom:12px">
-            <button type="button" class="chip active" data-role="all">All</button>
-            {% for key, label in role_labels.items() %}<button type="button" class="chip" data-role="{{ key }}">{{ label }}</button>{% endfor %}
+        <div class="lead-filters" id="lead-filters">
+            <div class="lead-filters-head">Refine results</div>
+            <div class="lead-filters-grid">
+                <div class="ff">
+                    <span class="ff-label">Role</span>
+                    <div class="ff-checks">
+                        {% for key, label in role_labels.items() %}
+                        <label class="check-chip"><input type="checkbox" class="f-role" value="{{ key }}">{{ label }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <label class="ff"><span class="ff-label">Min. employees</span>
+                    <input type="number" id="f-emp" min="0" class="input-inline" placeholder="any"></label>
+                <label class="ff"><span class="ff-label">Min. locations</span>
+                    <input type="number" id="f-loc" min="0" class="input-inline" placeholder="any"></label>
+                <label class="ff"><span class="ff-label">POS contains</span>
+                    <input type="text" id="f-pos" class="input-inline" placeholder="e.g. gastrofix"></label>
+                <label class="ff ff-toggle"><input type="checkbox" id="f-email"> Has email</label>
+                <label class="ff ff-toggle"><input type="checkbox" id="f-new"> New only</label>
+            </div>
+            <div class="hint-line" id="f-count"></div>
         </div>
         <div class="table-wrap">
         <table class="table" id="leads-table">
             <thead><tr><th></th><th>Business</th><th>Contact</th><th>Role</th><th>Email</th><th>Empl.</th><th>Revenue</th><th>Loc.</th><th>POS</th><th>Status</th></tr></thead>
             <tbody>
                 {% for b, c in rows %}
-                <tr data-role="{{ c.role }}">
+                <tr data-role="{{ c.role }}" data-emp="{{ b.employees }}" data-loc="{{ b.locations }}"
+                    data-pos="{{ b.pos_system|lower }}" data-email="{{ '1' if c.email else '0' }}" data-state="{{ c.state }}">
                     <td>{% if c.state == 'new' %}<input type="checkbox" name="row" value="{{ c.row }}" checked>{% endif %}</td>
                     <td>{{ b.name }}{% if b.website %} · <a href="{{ b.website }}" target="_blank" rel="noopener" class="muted">site</a>{% endif %}</td>
                     <td>{{ c.name or '—' }}</td>
@@ -153,20 +172,40 @@
 })();
 
 (function() {
-    const bar = document.getElementById('lead-role-filter');
+    const panel = document.getElementById('lead-filters');
     const table = document.getElementById('leads-table');
-    if (!bar || !table) return;
+    if (!panel || !table) return;
     const rows = Array.from(table.querySelectorAll('tbody tr'));
-    bar.addEventListener('click', (e) => {
-        const chip = e.target.closest('.chip');
-        if (!chip) return;
-        bar.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
-        chip.classList.add('active');
-        const r = chip.dataset.role;
-        rows.forEach(row => {
-            row.style.display = (r === 'all' || row.dataset.role === r) ? '' : 'none';
+    const roleChecks = Array.from(panel.querySelectorAll('.f-role'));
+    const empEl = document.getElementById('f-emp');
+    const locEl = document.getElementById('f-loc');
+    const posEl = document.getElementById('f-pos');
+    const emailEl = document.getElementById('f-email');
+    const newEl = document.getElementById('f-new');
+    const countEl = document.getElementById('f-count');
+    const num = (s) => { const m = (s || '').match(/\d+/); return m ? parseInt(m[0], 10) : null; };
+
+    function apply() {
+        const roles = roleChecks.filter(c => c.checked).map(c => c.value);
+        const minEmp = num(empEl.value), minLoc = num(locEl.value);
+        const pos = posEl.value.trim().toLowerCase();
+        let visible = 0;
+        rows.forEach(r => {
+            let show = true;
+            if (roles.length && !roles.includes(r.dataset.role)) show = false;
+            if (show && minEmp !== null) { const e = num(r.dataset.emp); if (e === null || e < minEmp) show = false; }
+            if (show && minLoc !== null) { const l = num(r.dataset.loc); if (l === null || l < minLoc) show = false; }
+            if (show && pos && !(r.dataset.pos || '').includes(pos)) show = false;
+            if (show && emailEl.checked && r.dataset.email !== '1') show = false;
+            if (show && newEl.checked && r.dataset.state !== 'new') show = false;
+            r.style.display = show ? '' : 'none';
+            if (show) visible++;
         });
-    });
+        countEl.textContent = visible + ' of ' + rows.length + ' contacts shown';
+    }
+    panel.addEventListener('input', apply);
+    panel.addEventListener('change', apply);
+    apply();
 })();
 </script>
 {% endblock %}
