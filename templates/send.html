@@ -120,10 +120,18 @@
                 </form>
                 {% endif %}
 
-                <h3 class="mt">Preview</h3>
+                <div class="preview-head mt">
+                    <h3 style="margin:0">Preview</h3>
+                    <div class="chip-bar" id="preview-filter" role="group" aria-label="Filter previews">
+                        <button type="button" class="chip active" data-filter="all">All {{ total_count }}</button>
+                        <button type="button" class="chip" data-filter="new">New {{ new_count }}</button>
+                        <button type="button" class="chip" data-filter="sent">Already sent {{ total_count - new_count }}</button>
+                        {% if incomplete_count %}<button type="button" class="chip" data-filter="incomplete">Incomplete {{ incomplete_count }}</button>{% endif %}
+                    </div>
+                </div>
                 <div class="previews">
                     {% for p in previews %}
-                    <details class="preview {% if p.already_sent %}sent{% endif %} {% if p.incomplete %}incomplete{% endif %}">
+                    <details class="preview {% if p.already_sent %}sent{% else %}new{% endif %} {% if p.incomplete %}incomplete{% endif %}">
                         <summary>
                             <span>
                                 <strong>{{ p.contact.firma or '—' }}</strong>
@@ -131,18 +139,24 @@
                                     &middot; {{ p.contact.first_name }} {{ p.contact.last_name }}
                                 {% endif %}
                                 <span class="badge dim" style="margin-left:8px">{{ p.template_variant }}</span>
-                                {% if p.incomplete %}<span class="badge err" style="margin-left:6px">incomplete</span>{% endif %}
+                                {% if p.template_variant != p.variant %}
+                                    <span class="badge warn" style="margin-left:6px" title="No {{ p.variant }} template exists for this type — the {{ p.template_variant }} one is used instead">fallback</span>
+                                {% endif %}
+                                {% if p.incomplete %}
+                                    <span class="badge err" style="margin-left:6px" title="Missing: {{ p.missing_fields|join(', ') }}">missing: {{ p.missing_fields|join(', ') }}</span>
+                                {% endif %}
                                 {% if p.already_sent %}<span class="badge dim" style="margin-left:6px">already sent</span>{% endif %}
                             </span>
                             <span class="mono muted">{{ p.contact.email }}</span>
                         </summary>
                         <div class="preview-body">
-                            <div class="kv"><span class="muted">Subject</span><span>{{ p.subject }}</span></div>
+                            <div class="kv"><span class="muted">Subject</span><span>{{ p.subject_html }}</span></div>
                             <div class="kv" style="align-items:flex-start"><span class="muted">Body</span></div>
-                            <pre class="mono">{{ p.body }}</pre>
+                            <pre class="mono">{{ p.body_html }}</pre>
                         </div>
                     </details>
                     {% endfor %}
+                    <p class="muted" id="preview-empty" style="display:none; text-align:center; padding:10px 0">No previews match this filter.</p>
                 </div>
             {% endif %}
         </div>
@@ -204,6 +218,27 @@
         setTimeout(poll, 1500);
     }
     setTimeout(poll, 1500);
+})();
+
+(function() {
+    const bar = document.getElementById('preview-filter');
+    if (!bar) return;
+    const previews = Array.from(document.querySelectorAll('details.preview'));
+    const empty = document.getElementById('preview-empty');
+    bar.addEventListener('click', (e) => {
+        const chip = e.target.closest('.chip');
+        if (!chip) return;
+        bar.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        const f = chip.dataset.filter;
+        let visible = 0;
+        previews.forEach(p => {
+            const show = f === 'all' || p.classList.contains(f);
+            p.style.display = show ? '' : 'none';
+            if (show) visible++;
+        });
+        empty.style.display = visible === 0 ? '' : 'none';
+    });
 })();
 </script>
 {% endblock %}

@@ -358,6 +358,7 @@ p { margin: 0 0 12px; }
 .badge.ok { color: var(--ok); border-color: rgba(52,211,153,0.25); background: rgba(52,211,153,0.06); }
 .badge.err { color: var(--danger); border-color: rgba(248,113,113,0.25); background: rgba(248,113,113,0.06); }
 .badge.dim { color: var(--text-mute); border-color: var(--border); }
+.badge.warn { color: var(--warn); border-color: rgba(245,158,11,0.25); background: rgba(245,158,11,0.06); }
 
 /* Sidebar list */
 .sidebar-list { list-style: none; padding: 0; margin: 0; display: flex; flex-direction: column; gap: 1px; }
@@ -404,6 +405,35 @@ p { margin: 0 0 12px; }
     background: rgba(52, 211, 153, 0.05);
     border: 1px solid rgba(52, 211, 153, 0.22);
     color: var(--ok);
+}
+
+/* Preview filter chips + marker highlight */
+.preview-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 14px;
+    flex-wrap: wrap;
+}
+.chip-bar { display: flex; gap: 6px; flex-wrap: wrap; }
+.chip {
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    font-size: 12px;
+    font-family: inherit;
+    padding: 5px 11px;
+    border-radius: 99px;
+    cursor: pointer;
+    transition: border-color 0.12s, color 0.12s, background 0.12s;
+}
+.chip:hover { border-color: var(--border-hover); color: var(--text); }
+.chip.active { background: var(--bg-elev); border-color: var(--border-hover); color: var(--text); }
+mark.missing {
+    background: rgba(245, 158, 11, 0.22);
+    color: var(--warn);
+    border-radius: 3px;
+    padding: 0 3px;
 }
 
 /* Background send progress */

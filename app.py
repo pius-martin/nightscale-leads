@@ -9,7 +9,9 @@ import secrets
 import threading
 from functools import wraps
 from urllib.parse import urlparse
+from html import unescape
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session
+from markupsafe import Markup, escape
 from werkzeug.middleware.proxy_fix import ProxyFix
 from dotenv import load_dotenv
 
@@ -686,6 +688,23 @@ def _wrap_email_html(inner_html: str) -> str:
     return EMAIL_HTML_TEMPLATE.format(content=inner_html or "")
 
 
+def _preview_text(html: str) -> str:
+    """Readable plain-text rendering of a composed email body for previews."""
+    text = re.sub(r"</p\s*>", "\n", html or "", flags=re.I)
+    text = re.sub(r"<br\s*/?>", "\n", text, flags=re.I)
+    text = re.sub(r"<[^>]+>", "", text)
+    return unescape(text).strip()
+
+
+def _highlight_marker(text: str) -> Markup:
+    """Escape text and wrap each missing-value marker in a <mark>."""
+    return Markup(
+        str(escape(text)).replace(
+            MISSING_MARKER, f'<mark class="missing">{MISSING_MARKER}</mark>'
+        )
+    )
+
+
 # ---------- Send ----------
 def _contact_variant(c: dict) -> str:
     has_name = bool((c.get("first_name") or "").strip() or (c.get("last_name") or "").strip())
@@ -795,14 +814,24 @@ def send_view():
         incomplete = MISSING_MARKER in subject or MISSING_MARKER in body
         if incomplete:
             incomplete_count += 1
+        raw_template = " ".join(
+            (template["subject"] or "", template["body"] or "", template.get("footer") or "")
+        )
+        missing_fields = sorted({
+            key for key in _PLACEHOLDER_RE.findall(raw_template)
+            if not str(c.get(key.strip().lower(), "") or "").strip()
+        })
         previews.append({
             "contact": c,
             "variant": variant,
             "template_variant": template["variant"],
             "subject": subject,
+            "subject_html": _highlight_marker(subject),
             "body": body,
+            "body_html": _highlight_marker(_preview_text(body)),
             "already_sent": sent_before,
             "incomplete": incomplete,
+            "missing_fields": missing_fields,
         })
     send_log = db.list_log(50)
     job = _send_job_snapshot()
