@@ -277,12 +277,40 @@ def send_mail(
             message["from"] = {"emailAddress": from_addr}
     payload = {"message": message, "saveToSentItems": True}
     url = f"{GRAPH_BASE}/me/sendMail"
-    r = requests.post(
-        url,
-        json=payload,
-        headers={"Authorization": f"Bearer {token}", "Content-Type": "application/json"},
-        timeout=30,
-    )
-    if r.status_code not in (200, 202):
-        raise RuntimeError(f"Graph error {r.status_code}: {r.text}")
-    return True
+    headers = {"Authorization": f"Bearer {token}", "Content-Type": "application/json"}
+
+    # Retry only when we know Graph did NOT accept the message: connection
+    # errors (request never sent) and 429/503/504. A read timeout is NOT
+    # retried — Graph may already have queued the mail, and retrying would
+    # send the lead a duplicate.
+    last_error, retry_after = None, None
+    for attempt in range(3):
+        if attempt:
+            time.sleep(min(retry_after or (2 if attempt == 1 else 5), 15))
+        try:
+            r = requests.post(url, json=payload, headers=headers, timeout=30)
+        except requests.exceptions.ConnectionError as e:
+            logger.warning("sendMail connection error (attempt %s): %s", attempt + 1, e)
+            last_error, retry_after = f"Connection error: {e}", None
+            continue
+        except requests.exceptions.Timeout:
+            raise RuntimeError(
+                "Send timed out after the request was made — the mail may still "
+                "have gone out. Check the account's Sent folder before retrying."
+            )
+        if r.status_code in (200, 202):
+            return True
+        try:
+            err = (r.json() or {}).get("error", {})
+            detail = f"{err.get('code', r.status_code)}: {err.get('message', 'request failed')}"
+        except ValueError:
+            detail = f"HTTP {r.status_code}"
+        logger.error("Graph sendMail failed (attempt %s): %s — %s", attempt + 1, r.status_code, r.text[:500])
+        if r.status_code not in (429, 503, 504):
+            raise RuntimeError(f"Graph error {detail}")
+        last_error = f"Graph error {detail}"
+        try:
+            retry_after = int(r.headers.get("Retry-After", "") or 0) or None
+        except ValueError:
+            retry_after = None
+    raise RuntimeError(last_error or "Graph send failed after retries")
