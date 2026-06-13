@@ -1,0 +1,29 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Unsubscribe · Nightscale</title>
+    <link rel="icon" type="image/svg+xml" href="{{ url_for('static', filename='favicon.svg') }}">
+    <link rel="stylesheet" href="{{ url_for('static', filename='style.css') }}">
+</head>
+<body>
+    <main class="login-screen">
+        <div class="card login-card" style="text-align:center">
+            {% if invalid %}
+                <h1 style="font-size:20px; margin:0 0 10px">Invalid link</h1>
+                <p class="muted" style="margin:0">This unsubscribe link is not valid or has expired.</p>
+            {% elif done %}
+                <h1 style="font-size:20px; margin:0 0 10px">You're unsubscribed</h1>
+                <p class="muted" style="margin:0"><strong>{{ email }}</strong> will no longer receive emails from us.</p>
+            {% else %}
+                <h1 style="font-size:20px; margin:0 0 10px">Unsubscribe</h1>
+                <p class="muted" style="margin:0 0 20px">Stop receiving emails at <strong>{{ email }}</strong>?</p>
+                <form method="post">
+                    <button type="submit" class="btn btn-primary" style="width:100%">Unsubscribe me</button>
+                </form>
+            {% endif %}
+        </div>
+    </main>
+</body>
+</html>

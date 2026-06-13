@@ -88,7 +88,7 @@
                 {% elif job_summary %}
                 <div class="banner {{ 'warn' if job_summary.failed or job_summary.error else 'ok' }}">
                     <span>
-                        Last send ({{ job_summary.art }}): <strong>{{ job_summary.sent }} sent</strong>{% if job_summary.failed %}, {{ job_summary.failed }} failed — see the log below{% endif %}{% if job_summary.skipped %}, {{ job_summary.skipped }} already-sent skipped{% endif %}.
+                        Last send ({{ job_summary.art }}): <strong>{{ job_summary.sent }} sent</strong>{% if job_summary.failed %}, {{ job_summary.failed }} failed — see the log below{% endif %}{% if job_summary.skipped %}, {{ job_summary.skipped }} already-sent skipped{% endif %}{% if job_summary.suppressed %}, {{ job_summary.suppressed }} unsubscribed/suppressed{% endif %}.
                         {% if job_summary.error %}Job stopped early: {{ job_summary.error }}{% endif %}
                     </span>
                 </div>

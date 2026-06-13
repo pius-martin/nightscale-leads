@@ -33,6 +33,7 @@ class FakeState:
         self.settings = {}
         self.ms_accounts = {}
         self.sent_log = []
+        self.suppression = {}
 
 
 S = FakeState()
@@ -50,15 +51,23 @@ def install_fake_db():
     db.delete_art = lambda name: S.arten.remove(name) if name in S.arten else None
     db.art_usage_count = lambda name: sum(1 for c in S.contacts.values() if c["art"] == name)
 
-    def add_contact(firma, first_name, last_name, email, art, notes="", pos_system=""):
+    def add_contact(firma, first_name, last_name, email, art, notes="", pos_system="", source=""):
         cid = S.next_cid
         S.next_cid += 1
         S.contacts[cid] = _full_name({
             "id": cid, "firma": firma.strip(), "first_name": first_name.strip(),
             "last_name": last_name.strip(), "email": email.strip(), "art": art.strip(),
-            "pos_system": pos_system.strip(), "notes": notes.strip(), "created_at": None,
+            "pos_system": pos_system.strip(), "status": "new", "source": source.strip(),
+            "notes": notes.strip(), "created_at": None,
         })
     db.add_contact = add_contact
+    db.all_contact_emails = lambda: {c["email"].lower() for c in S.contacts.values()}
+    db.set_contact_status = lambda cid, status: S.contacts[cid].update(status=status)
+    db.add_suppression = lambda email, reason="": S.suppression.__setitem__((email or "").strip().lower(), reason)
+    db.remove_suppression = lambda email: S.suppression.pop((email or "").strip().lower(), None)
+    db.is_suppressed = lambda email: (email or "").strip().lower() in S.suppression
+    db.suppressed_emails = lambda: set(S.suppression)
+    db.list_suppression = lambda: [{"email": e, "reason": r, "created_at": None} for e, r in S.suppression.items()]
 
     def update_contact(cid, firma, first_name, last_name, email, art, notes="", pos_system=""):
         S.contacts[cid].update(_full_name({
@@ -142,6 +151,8 @@ install_fake_graph()
 import app as app_module  # noqa: E402  (must come after the fakes)
 
 app_module.APP_PASSWORD = ""
+# Avoid real DNS-over-HTTPS calls during the offline test.
+app_module._domain_has_mail = lambda domain: True
 flask_app = app_module.app
 flask_app.config["TESTING"] = True
 
@@ -249,6 +260,22 @@ def main():
     ok(len(S.contacts) == 2, "1 of 3 import rows added")
     ok(any(x["pos_system"] == "Vectron" for x in S.contacts.values()), "pos_system imported from CSV")
 
+    # re-importing the same file → all rows are now duplicates
+    r = c.post("/contacts/import", data={
+        "csrf_token": token, "file": (io.BytesIO(csv_data.encode()), "again.csv"),
+    }, content_type="multipart/form-data", follow_redirects=True)
+    ok(b"duplicate email" in r.data, "duplicate rows flagged on re-import")
+    ok(len(S.contacts) == 2, "no new contacts from duplicate re-import")
+
+    # suppressed addresses are refused on import
+    db.add_suppression("blocked@x.com", "manual")
+    csv_sup = "company,email,type\nBlocked Co,blocked@x.com,Investor\n"
+    r = c.post("/contacts/import", data={
+        "csrf_token": token, "file": (io.BytesIO(csv_sup.encode()), "sup.csv"),
+    }, content_type="multipart/form-data", follow_redirects=True)
+    ok(b"suppression list" in r.data, "suppressed email skipped on import")
+    ok(len(S.contacts) == 2, "suppressed email not added")
+
     # --- types
     c.post("/types", data={"csrf_token": token, "name": "Partner"})
     ok("Partner" in S.arten, "type added")
@@ -325,6 +352,25 @@ def main():
     ok("flow" in js and "accounts" in js, "auth status exposes flow state")
     c.post("/auth/signout", data={"csrf_token": token, "username": "sender@example.com"})
     ok("sender@example.com" not in S.ms_accounts, "account disconnect works")
+
+    # --- unsubscribe flow (public, token-authenticated, no CSRF)
+    utok = app_module.make_unsubscribe_token("lead@firma.at")
+    r = c.get(f"/u/{utok}")
+    ok(r.status_code == 200 and b"Unsubscribe" in r.data, "unsubscribe page renders")
+    ok(not db.is_suppressed("lead@firma.at"), "GET does not opt out (scanner-safe)")
+    r = c.post(f"/u/{utok}")
+    ok(r.status_code == 200 and db.is_suppressed("lead@firma.at"), "POST opts out without CSRF token")
+    ok(c.get("/u/garbage-token").status_code == 400, "invalid unsubscribe token → 400")
+
+    # --- suppressed contacts are never emailed
+    db.add_contact("Suppressed GmbH", "", "", "skip@firma.at", "Investor")
+    db.add_suppression("skip@firma.at", "manual")
+    SENT_MAILS.clear()
+    c.post("/send/run", data={
+        "csrf_token": token, "art": "Investor", "mode": "all", "account": "sender@example.com",
+    })
+    wait_send_done(c)
+    ok(all(m["to"] != "skip@firma.at" for m in SENT_MAILS), "suppressed contact skipped on send")
 
     # --- contact delete
     cid = next(iter(S.contacts))

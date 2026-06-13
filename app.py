@@ -10,6 +10,8 @@ import threading
 from functools import wraps
 from urllib.parse import urlparse
 from html import unescape
+import requests
+from itsdangerous import URLSafeSerializer, BadSignature
 from flask import Flask, render_template, request, redirect, url_for, jsonify, flash, session
 from markupsafe import Markup, escape
 from werkzeug.middleware.proxy_fix import ProxyFix
@@ -124,19 +126,27 @@ def login_required(f):
     return wrapper
 
 
+# Public, token-authenticated endpoints: no login, no CSRF (the signed token
+# in the URL is the credential). They still need the DB to be ready.
+_PUBLIC_ENDPOINTS = {"unsubscribe"}
+_CSRF_EXEMPT = {"unsubscribe"}
+
+
 @app.before_request
 def gate():
-    if request.method == "POST":
+    if request.method == "POST" and request.endpoint not in _CSRF_EXEMPT:
         failure = _check_csrf()
         if failure:
             return failure
-    # Allow static files and login page through without auth
+    # Allow static files and login page through without auth or DB
     if request.endpoint in {"login", "static", "health"}:
         return None
     # Try to ensure DB is ready
     err = _ensure_db()
     if err:
         return render_template("db_error.html", error=err), 503
+    if request.endpoint in _PUBLIC_ENDPOINTS:
+        return None
     if APP_PASSWORD and not session.get("authed"):
         return redirect(url_for("login", next=_safe_next(_current_full_path())))
     return None
@@ -247,6 +257,22 @@ def health():
     return {"ok": True}
 
 
+@app.route("/u/<token>", methods=["GET", "POST"])
+def unsubscribe(token):
+    """Public opt-out link placed in outgoing emails. GET shows a confirm
+    page (so email-security scanners that prefetch links don't auto-opt-out);
+    POST records the suppression."""
+    try:
+        email = _unsub_serializer().loads(token)["e"]
+    except (BadSignature, KeyError, TypeError):
+        return render_template("unsubscribe.html", invalid=True, done=False, email=None), 400
+    if request.method == "POST":
+        db.add_suppression(email, "unsubscribe")
+        log.info("Unsubscribe: %s", email)
+        return render_template("unsubscribe.html", invalid=False, done=True, email=email)
+    return render_template("unsubscribe.html", invalid=False, done=False, email=email)
+
+
 @app.route("/login", methods=["GET", "POST"])
 def login():
     if not APP_PASSWORD:
@@ -279,6 +305,46 @@ _EMAIL_RE = re.compile(r"^[^@\s]+@[^@\s]+\.[^@\s]{2,}$")
 
 def _valid_email(value: str) -> bool:
     return bool(_EMAIL_RE.match((value or "").strip()))
+
+
+_MX_CACHE: dict[str, bool] = {}
+
+
+def _domain_has_mail(domain: str) -> bool:
+    """Best-effort check that a domain can receive mail, via DNS-over-HTTPS
+    (free, no API key). Accepts an MX record, or an A record as fallback.
+    Fails OPEN: any network/parse error returns True so a flaky lookup never
+    wrongly drops a valid lead."""
+    domain = (domain or "").strip().lower()
+    if not domain:
+        return False
+    if domain in _MX_CACHE:
+        return _MX_CACHE[domain]
+    try:
+        for rtype, code in (("MX", 15), ("A", 1)):
+            r = requests.get(
+                "https://dns.google/resolve",
+                params={"name": domain, "type": rtype},
+                timeout=4,
+            )
+            data = r.json()
+            if data.get("Status") == 0 and any(a.get("type") == code for a in data.get("Answer", [])):
+                _MX_CACHE[domain] = True
+                return True
+        _MX_CACHE[domain] = False
+        return False
+    except Exception:
+        log.warning("MX lookup failed for %s (assuming deliverable)", domain)
+        return True
+
+
+# --- Unsubscribe tokens (public, token-authenticated links in emails) ---
+def _unsub_serializer() -> URLSafeSerializer:
+    return URLSafeSerializer(app.secret_key, salt="unsubscribe")
+
+
+def make_unsubscribe_token(email: str) -> str:
+    return _unsub_serializer().dumps({"e": (email or "").strip().lower()})
 
 
 def _validate_contact_form(form) -> dict:
@@ -363,9 +429,14 @@ def _parse_xlsx(file_storage) -> list[dict]:
 
 
 def _import_rows(rows: list[dict]) -> tuple[int, int, list[str]]:
-    """Insert valid rows. Returns (added, skipped, error messages)."""
+    """Insert valid rows with list hygiene: skip rows with missing/invalid
+    fields, duplicates (already in the DB or earlier in this file),
+    suppressed addresses, and domains with no mail server. Returns
+    (added, skipped, error messages)."""
     added, skipped, errors = 0, 0, []
     existing_arten = set(db.list_arten())
+    seen_emails = db.all_contact_emails()
+    suppressed = db.suppressed_emails()
     for i, r in enumerate(rows, start=2):  # row 1 is the header
         email = r.get("email", "").strip()
         firma = r.get("firma", "").strip()
@@ -386,6 +457,19 @@ def _import_rows(rows: list[dict]) -> tuple[int, int, list[str]]:
             skipped += 1
             errors.append(f"row {i}: needs at least company or a name")
             continue
+        email_lc = email.lower()
+        if email_lc in seen_emails:
+            skipped += 1
+            errors.append(f"row {i}: duplicate email '{email}'")
+            continue
+        if email_lc in suppressed:
+            skipped += 1
+            errors.append(f"row {i}: '{email}' is on the suppression list")
+            continue
+        if not _domain_has_mail(email_lc.rsplit("@", 1)[-1]):
+            skipped += 1
+            errors.append(f"row {i}: no mail server (MX) for '{email}'")
+            continue
         if art not in existing_arten:
             db.add_art(art)
             existing_arten.add(art)
@@ -397,7 +481,9 @@ def _import_rows(rows: list[dict]) -> tuple[int, int, list[str]]:
             art=art,
             notes=r.get("notes", ""),
             pos_system=r.get("pos_system", ""),
+            source="import",
         )
+        seen_emails.add(email_lc)
         added += 1
     return added, skipped, errors
 
@@ -729,7 +815,7 @@ _send_job_lock = threading.Lock()
 _send_job = {
     "status": "idle",  # idle | running | done
     "art": "", "mode": "", "account": "",
-    "total": 0, "sent": 0, "failed": 0, "skipped": 0,
+    "total": 0, "sent": 0, "failed": 0, "skipped": 0, "suppressed": 0,
     "current": "", "error": "", "reported": True,
 }
 
@@ -744,10 +830,17 @@ def _run_send_job(art: str, mode: str, account: str):
         variants_for_art = db.get_templates_for_art(art)
         contacts_for_art = db.list_contacts(art=art)
         already = db.sent_contact_ids(art) if mode == "new" else set()
-        targets = [c for c in contacts_for_art if not (mode == "new" and c["id"] in already)]
-        skipped = len(contacts_for_art) - len(targets)
+        suppressed = db.suppressed_emails()
+        targets, skipped, suppressed_skipped = [], 0, 0
+        for c in contacts_for_art:
+            if mode == "new" and c["id"] in already:
+                skipped += 1
+            elif (c.get("email") or "").strip().lower() in suppressed:
+                suppressed_skipped += 1
+            else:
+                targets.append(c)
         with _send_job_lock:
-            _send_job.update(total=len(targets), skipped=skipped)
+            _send_job.update(total=len(targets), skipped=skipped, suppressed=suppressed_skipped)
         sender_name = _sender_name_for(account)
         sender_email = _sender_email_for(account)
         signature = _signature_for_account(account)
@@ -897,7 +990,7 @@ def send_run():
             return redirect(url_for("send_view", art=art))
         _send_job.update(
             status="running", art=art, mode=mode, account=account,
-            total=0, sent=0, failed=0, skipped=0, current="", error="",
+            total=0, sent=0, failed=0, skipped=0, suppressed=0, current="", error="",
             reported=False,
         )
     log.info("Send job started (art=%s, mode=%s, account=%s)", art, mode, account)

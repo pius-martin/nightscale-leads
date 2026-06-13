@@ -24,7 +24,15 @@ CREATE TABLE IF NOT EXISTS contacts (
     email TEXT NOT NULL,
     art TEXT NOT NULL,
     pos_system TEXT NOT NULL DEFAULT '',
+    status TEXT NOT NULL DEFAULT 'new',
+    source TEXT NOT NULL DEFAULT '',
     notes TEXT DEFAULT '',
+    created_at TIMESTAMPTZ DEFAULT NOW()
+);
+
+CREATE TABLE IF NOT EXISTS suppression (
+    email TEXT PRIMARY KEY,
+    reason TEXT NOT NULL DEFAULT '',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
 
@@ -74,6 +82,8 @@ MIGRATIONS = """
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pos_system TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'new';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS footer TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'personal';
 
@@ -196,12 +206,59 @@ def list_contacts(art: str | None = None):
         return [_attach_full_name(dict(r)) for r in cur.fetchall()]
 
 
-def add_contact(firma, first_name, last_name, email, art, notes="", pos_system=""):
+def add_contact(firma, first_name, last_name, email, art, notes="", pos_system="", source=""):
     with get_conn() as c, c.cursor() as cur:
         cur.execute(
-            "INSERT INTO contacts (firma, first_name, last_name, email, art, pos_system, notes) VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), pos_system.strip(), notes.strip()),
+            "INSERT INTO contacts (firma, first_name, last_name, email, art, pos_system, source, notes) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
+            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), pos_system.strip(), source.strip(), notes.strip()),
         )
+
+
+def all_contact_emails() -> set:
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT LOWER(email) FROM contacts")
+        return {r[0] for r in cur.fetchall()}
+
+
+def set_contact_status(cid, status):
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("UPDATE contacts SET status=%s WHERE id=%s", (status, cid))
+
+
+# Suppression (never-contact list)
+def add_suppression(email: str, reason: str = ""):
+    email = (email or "").strip().lower()
+    if not email:
+        return
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute(
+            "INSERT INTO suppression (email, reason) VALUES (%s, %s) ON CONFLICT (email) DO UPDATE SET reason = EXCLUDED.reason",
+            (email, reason),
+        )
+
+
+def remove_suppression(email: str):
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("DELETE FROM suppression WHERE email=%s", ((email or "").strip().lower(),))
+
+
+def is_suppressed(email: str) -> bool:
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT 1 FROM suppression WHERE email=%s", ((email or "").strip().lower(),))
+        return cur.fetchone() is not None
+
+
+def suppressed_emails() -> set:
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT email FROM suppression")
+        return {r[0] for r in cur.fetchall()}
+
+
+def list_suppression() -> list:
+    with get_conn() as c:
+        cur = _dict_cursor(c)
+        cur.execute("SELECT * FROM suppression ORDER BY created_at DESC")
+        return [dict(r) for r in cur.fetchall()]
 
 
 def update_contact(cid, firma, first_name, last_name, email, art, notes="", pos_system=""):
