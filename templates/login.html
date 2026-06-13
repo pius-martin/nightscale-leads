@@ -13,7 +13,7 @@
             <div class="brand" style="justify-content:center">
                 <img src="{{ url_for('static', filename='002_W.png') }}" alt="Nightscale" class="brand-logo brand-logo-lg">
             </div>
-            <form method="post" class="form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <form method="post" class="form" data-loading="Signing in…"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <label>Password
                     <input type="password" name="password" required autofocus>
                 </label>

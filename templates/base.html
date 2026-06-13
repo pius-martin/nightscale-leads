@@ -44,6 +44,15 @@
         {% block content %}{% endblock %}
     </main>
 
+    <dialog id="confirm-dialog">
+        <p id="confirm-message"></p>
+        <div class="row confirm-actions">
+            <button type="button" class="btn btn-ghost" id="confirm-cancel">Cancel</button>
+            <button type="button" class="btn btn-primary" id="confirm-ok">Confirm</button>
+        </div>
+    </dialog>
+
+    <script src="{{ url_for('static', filename='app.js') }}"></script>
     {% block scripts %}{% endblock %}
 </body>
 </html>

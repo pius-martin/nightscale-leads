@@ -443,6 +443,56 @@ p { margin: 0 0 12px; }
 }
 .send-resend { display: flex; flex-direction: column; gap: 5px; max-width: 260px; }
 
+/* Confirm dialog */
+#confirm-dialog {
+    background: var(--bg-card);
+    color: var(--text);
+    border: 1px solid var(--border-strong);
+    border-radius: var(--radius);
+    padding: 22px 24px;
+    max-width: 420px;
+    width: calc(100vw - 48px);
+    box-shadow: 0 16px 48px rgba(0,0,0,0.5);
+}
+#confirm-dialog::backdrop { background: rgba(0,0,0,0.55); }
+#confirm-dialog p { margin: 0 0 18px; font-size: 14px; line-height: 1.55; }
+#confirm-dialog .confirm-actions { justify-content: flex-end; gap: 10px; }
+
+/* Loading buttons */
+.btn-loading { pointer-events: none; opacity: 0.85; }
+.btn-loading::after {
+    content: '';
+    width: 12px;
+    height: 12px;
+    border: 2px solid currentColor;
+    border-right-color: transparent;
+    border-radius: 50%;
+    animation: btn-spin 0.7s linear infinite;
+}
+@keyframes btn-spin { to { transform: rotate(360deg); } }
+@media (prefers-reduced-motion: reduce) {
+    .btn-loading::after { animation: none; border-right-color: currentColor; opacity: 0.4; }
+}
+
+/* Flash dismiss */
+.flash { position: relative; padding-right: 38px; transition: opacity 0.4s; }
+.flash.fade-out { opacity: 0; }
+.flash-close {
+    position: absolute;
+    top: 50%;
+    right: 8px;
+    transform: translateY(-50%);
+    background: transparent;
+    border: none;
+    color: inherit;
+    opacity: 0.6;
+    font-size: 16px;
+    line-height: 1;
+    padding: 4px 8px;
+    cursor: pointer;
+}
+.flash-close:hover { opacity: 1; }
+
 /* Login */
 .login-screen {
     min-height: 100vh;

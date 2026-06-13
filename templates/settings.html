@@ -27,7 +27,7 @@
     <div class="card{% if not loop.first %} mt{% endif %}" id="acc-{{ a.username }}">
         <div class="card-header">
             <h2>{{ a.username }}</h2>
-            <form action="{{ url_for('auth_signout') }}" method="post" onsubmit="return confirm('Disconnect {{ a.username }}?')"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+            <form action="{{ url_for('auth_signout') }}" method="post" data-confirm="Disconnect {{ a.username }}?"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                 <input type="hidden" name="username" value="{{ a.username }}">
                 <input type="hidden" name="from" value="settings">
                 <button class="btn btn-danger btn-sm" type="submit">Disconnect</button>

@@ -140,7 +140,7 @@
         Excel (.xlsx) and CSV (semicolon, comma, or tab) are all supported.
     </p>
 
-    <form action="{{ url_for('contacts_import') }}" method="post" enctype="multipart/form-data" class="form"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+    <form action="{{ url_for('contacts_import') }}" method="post" enctype="multipart/form-data" class="form" data-loading="Importing…"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
         <div class="row" style="gap:10px; align-items:center">
             <input type="file" name="file" accept=".csv,.xlsx,.xlsm" required style="color:var(--text); padding:8px 0">
             <button type="submit" class="btn btn-primary">Upload</button>
@@ -184,7 +184,7 @@
                 <td><span class="tag">{{ c.art }}</span></td>
                 <td class="actions">
                     <a class="btn btn-ghost btn-sm" href="{{ url_for('edit_contact', cid=c.id) }}">Edit</a>
-                    <form action="{{ url_for('delete_contact', cid=c.id) }}" method="post" onsubmit="return confirm('Delete this contact?')" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <form action="{{ url_for('delete_contact', cid=c.id) }}" method="post" data-confirm="Delete this contact?" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
                         <button class="btn btn-danger btn-sm" type="submit">Delete</button>
                     </form>
                 </td>
