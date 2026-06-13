@@ -692,6 +692,80 @@ def _contact_variant(c: dict) -> str:
     return "personal" if has_name else "anonymous"
 
 
+# Batch sends run in a background thread so big campaigns don't hit the
+# request timeout. Single shared job (Procfile runs one worker); progress is
+# polled via /send/status. If the process restarts mid-job, "Send to new"
+# resumes safely because sent_log dedupes already-sent contacts.
+_send_job_lock = threading.Lock()
+_send_job = {
+    "status": "idle",  # idle | running | done
+    "art": "", "mode": "", "account": "",
+    "total": 0, "sent": 0, "failed": 0, "skipped": 0,
+    "current": "", "error": "", "reported": True,
+}
+
+
+def _send_job_snapshot() -> dict:
+    with _send_job_lock:
+        return dict(_send_job)
+
+
+def _run_send_job(art: str, mode: str, account: str):
+    try:
+        variants_for_art = db.get_templates_for_art(art)
+        contacts_for_art = db.list_contacts(art=art)
+        already = db.sent_contact_ids(art) if mode == "new" else set()
+        targets = [c for c in contacts_for_art if not (mode == "new" and c["id"] in already)]
+        skipped = len(contacts_for_art) - len(targets)
+        with _send_job_lock:
+            _send_job.update(total=len(targets), skipped=skipped)
+        sender_name = _sender_name_for(account)
+        sender_email = _sender_email_for(account)
+        signature = _signature_for_account(account)
+        for c in targets:
+            with _send_job_lock:
+                _send_job["current"] = c["email"]
+            variant = _contact_variant(c)
+            template = variants_for_art.get(variant) or variants_for_art.get(
+                "personal" if variant == "anonymous" else "anonymous"
+            )
+            if not template:
+                db.log_send(c["id"], c["email"], art, "", "failed", f"no template for variant {variant}")
+                with _send_job_lock:
+                    _send_job["failed"] += 1
+                continue
+            subject = render_template_text(template["subject"], c)
+            inner = _compose_body(template["body"], template.get("footer", ""), signature, c)
+            body_html = _wrap_email_html(inner)
+            try:
+                graph_mail.send_mail(
+                    c["email"], subject, body_html,
+                    sender_name=sender_name or None,
+                    sender_email=sender_email or None,
+                    account=account,
+                )
+                db.log_send(c["id"], c["email"], art, subject, "sent")
+                with _send_job_lock:
+                    _send_job["sent"] += 1
+            except Exception as e:
+                log.exception("Send failed (contact=%s, email=%s, art=%s)", c["id"], c["email"], art)
+                db.log_send(c["id"], c["email"], art, subject, "failed", str(e))
+                with _send_job_lock:
+                    _send_job["failed"] += 1
+        log.info(
+            "Send job finished (art=%s, mode=%s): %s sent, %s failed, %s skipped",
+            art, mode, _send_job["sent"], _send_job["failed"], skipped,
+        )
+    except Exception as e:
+        log.exception("Send job crashed (art=%s, mode=%s)", art, mode)
+        with _send_job_lock:
+            _send_job["error"] = str(e)
+    finally:
+        with _send_job_lock:
+            _send_job["status"] = "done"
+            _send_job["current"] = ""
+
+
 @app.route("/send", methods=["GET"])
 def send_view():
     arten = db.list_arten()
@@ -730,7 +804,14 @@ def send_view():
             "already_sent": sent_before,
             "incomplete": incomplete,
         })
-    log = db.list_log(50)
+    send_log = db.list_log(50)
+    job = _send_job_snapshot()
+    # Show a finished job's summary exactly once, then mark it reported.
+    job_summary = None
+    if job["status"] == "done" and not job["reported"]:
+        job_summary = job
+        with _send_job_lock:
+            _send_job["reported"] = True
     return render_template(
         "send.html",
         arten=arten,
@@ -742,7 +823,9 @@ def send_view():
         incomplete_count=incomplete_count,
         missing_variants=sorted(missing_variants),
         marker=MISSING_MARKER,
-        log=log,
+        log=send_log,
+        send_job=job if job["status"] == "running" else None,
+        job_summary=job_summary,
     )
 
 
@@ -765,54 +848,27 @@ def send_run():
         flash("Pick which account to send from.", "error")
         return redirect(url_for("send_view", art=art))
 
-    variants_for_art = db.get_templates_for_art(art)
-    if not variants_for_art:
+    if not db.get_templates_for_art(art):
         flash("No template for this type.", "error")
         return redirect(url_for("send_view", art=art))
 
-    contacts_for_art = db.list_contacts(art=art)
-    already = db.sent_contact_ids(art) if mode == "new" else set()
-    sender_name = _sender_name_for(account)
-    sender_email = _sender_email_for(account)
-    signature = _signature_for_account(account)
-    sent, failed, skipped = 0, 0, 0
-    for c in contacts_for_art:
-        if mode == "new" and c["id"] in already:
-            skipped += 1
-            continue
-        variant = _contact_variant(c)
-        template = variants_for_art.get(variant) or variants_for_art.get(
-            "personal" if variant == "anonymous" else "anonymous"
+    with _send_job_lock:
+        if _send_job["status"] == "running":
+            flash("A send is already running — wait for it to finish.", "error")
+            return redirect(url_for("send_view", art=art))
+        _send_job.update(
+            status="running", art=art, mode=mode, account=account,
+            total=0, sent=0, failed=0, skipped=0, current="", error="",
+            reported=False,
         )
-        if not template:
-            failed += 1
-            db.log_send(c["id"], c["email"], art, "", "failed", f"no template for variant {variant}")
-            continue
-        subject = render_template_text(template["subject"], c)
-        inner = _compose_body(template["body"], template.get("footer", ""), signature, c)
-        body_html = _wrap_email_html(inner)
-        try:
-            graph_mail.send_mail(
-                c["email"],
-                subject,
-                body_html,
-                sender_name=sender_name or None,
-                sender_email=sender_email or None,
-                account=account,
-            )
-            db.log_send(c["id"], c["email"], art, subject, "sent")
-            sent += 1
-        except Exception as e:
-            log.exception("Send failed (contact=%s, email=%s, art=%s)", c["id"], c["email"], art)
-            db.log_send(c["id"], c["email"], art, subject, "failed", str(e))
-            failed += 1
-    parts = [f"Sent {sent}"]
-    if skipped:
-        parts.append(f"skipped {skipped} already-sent")
-    if failed:
-        parts.append(f"{failed} failed")
-    flash(", ".join(parts) + ".", "success" if failed == 0 else "error")
+    log.info("Send job started (art=%s, mode=%s, account=%s)", art, mode, account)
+    threading.Thread(target=_run_send_job, args=(art, mode, account), daemon=True).start()
     return redirect(url_for("send_view", art=art))
+
+
+@app.route("/send/status")
+def send_status():
+    return jsonify(_send_job_snapshot())
 
 
 # ---------- Settings ----------

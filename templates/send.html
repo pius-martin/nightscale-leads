@@ -73,30 +73,51 @@
                 </div>
                 {% endif %}
 
-                {% if ms_accounts %}
-                <div class="send-actions" style="align-items:flex-end; gap:14px">
+                {% if send_job %}
+                <div class="send-progress" id="send-progress" data-status-url="{{ url_for('send_status') }}">
+                    <div class="send-progress-head">
+                        <strong>Sending "{{ send_job.art }}" from {{ send_job.account }}…</strong>
+                        <span class="mono muted" id="progress-count">{{ send_job.sent + send_job.failed }} / {{ send_job.total or '?' }}</span>
+                    </div>
+                    <div class="progress-track"><div class="progress-bar" id="progress-bar"></div></div>
+                    <div class="muted" id="progress-detail">
+                        {{ send_job.sent }} sent · {{ send_job.failed }} failed{% if send_job.current %} · current: {{ send_job.current }}{% endif %}
+                    </div>
+                    <div class="hint-line">You can leave this page — the send keeps running. If the server restarts mid-send, use "Send to new" again; already-sent contacts are skipped automatically.</div>
+                </div>
+                {% elif job_summary %}
+                <div class="banner {{ 'warn' if job_summary.failed or job_summary.error else 'ok' }}">
+                    <span>
+                        Last send ({{ job_summary.art }}): <strong>{{ job_summary.sent }} sent</strong>{% if job_summary.failed %}, {{ job_summary.failed }} failed — see the log below{% endif %}{% if job_summary.skipped %}, {{ job_summary.skipped }} already-sent skipped{% endif %}.
+                        {% if job_summary.error %}Job stopped early: {{ job_summary.error }}{% endif %}
+                    </span>
+                </div>
+                {% endif %}
+
+                {% if ms_accounts and not send_job %}
+                <form action="{{ url_for('send_run') }}" method="post" class="send-actions" id="send-form" style="align-items:flex-end; gap:14px">
+                    <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+                    <input type="hidden" name="art" value="{{ selected }}">
                     <label style="display:flex; flex-direction:column; gap:6px; font-size:11px; color:var(--text-dim); text-transform:uppercase; letter-spacing:0.07em; font-weight:500">
                         Send from
-                        <select id="account-picker" style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:9px 12px; border-radius:6px; font-size:13.5px; min-width:240px; text-transform:none; letter-spacing:normal; font-weight:400">
+                        <select name="account" required style="background:var(--bg-input); border:1px solid var(--border-strong); color:var(--text); padding:9px 12px; border-radius:6px; font-size:13.5px; min-width:240px; text-transform:none; letter-spacing:normal; font-weight:400">
                             {% for a in ms_accounts %}<option value="{{ a.username }}">{{ a.username }}</option>{% endfor %}
                         </select>
                     </label>
-
                     {% if new_count > 0 %}
-                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Send {{ new_count }} new email{{ '' if new_count == 1 else 's' }}?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <input type="hidden" name="art" value="{{ selected }}">
-                        <input type="hidden" name="mode" value="new">
-                        <input type="hidden" name="account" value="">
-                        <button class="btn btn-primary" type="submit">Send to {{ new_count }} new</button>
-                    </form>
+                    <button class="btn btn-primary" type="submit" name="mode" value="new"
+                            onclick="return confirm('Send {{ new_count }} new email{{ '' if new_count == 1 else 's' }}?');">
+                        Send to {{ new_count }} new
+                    </button>
                     {% endif %}
-                    <form action="{{ url_for('send_run') }}" method="post" class="send-form" onsubmit="return confirm('Re-send to ALL {{ total_count }} recipient{{ '' if total_count == 1 else 's' }} (including duplicates)?');"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
-                        <input type="hidden" name="art" value="{{ selected }}">
-                        <input type="hidden" name="mode" value="all">
-                        <input type="hidden" name="account" value="">
-                        <button class="btn btn-ghost" type="submit">Send to all {{ total_count }}</button>
-                    </form>
-                </div>
+                    <div class="send-resend">
+                        <button class="btn btn-ghost" type="submit" name="mode" value="all"
+                                onclick="return confirm('Re-send to ALL {{ total_count }} recipient{{ '' if total_count == 1 else 's' }}, including {{ total_count - new_count }} who already received this campaign?');">
+                            Re-send to all {{ total_count }}
+                        </button>
+                        <span class="hint-line">includes contacts that already received this campaign</span>
+                    </div>
+                </form>
                 {% endif %}
 
                 <h3 class="mt">Preview</h3>
@@ -158,16 +179,31 @@
 {% block scripts %}
 <script>
 (function() {
-    const picker = document.getElementById('account-picker');
-    const forms = document.querySelectorAll('.send-form');
-    function syncAccount() {
-        const v = picker ? picker.value : '';
-        forms.forEach(f => {
-            const inp = f.querySelector('input[name=account]');
-            if (inp) inp.value = v;
-        });
+    const panel = document.getElementById('send-progress');
+    if (!panel) return;
+    const bar = document.getElementById('progress-bar');
+    const count = document.getElementById('progress-count');
+    const detail = document.getElementById('progress-detail');
+    async function poll() {
+        let job;
+        try {
+            job = await fetch(panel.dataset.statusUrl).then(r => r.json());
+        } catch (e) {
+            setTimeout(poll, 3000); // transient network error — retry slower
+            return;
+        }
+        if (job.status !== 'running') {
+            location.reload(); // refresh stats, log and the one-time summary
+            return;
+        }
+        const done = job.sent + job.failed;
+        count.textContent = done + ' / ' + (job.total || '?');
+        bar.style.width = job.total ? Math.round(100 * done / job.total) + '%' : '0%';
+        detail.textContent = job.sent + ' sent · ' + job.failed + ' failed' +
+            (job.current ? ' · current: ' + job.current : '');
+        setTimeout(poll, 1500);
     }
-    if (picker) { picker.addEventListener('change', syncAccount); syncAccount(); }
+    setTimeout(poll, 1500);
 })();
 </script>
 {% endblock %}
