@@ -19,6 +19,7 @@ from dotenv import load_dotenv
 
 import db
 import graph_mail
+import leadgen
 
 load_dotenv()
 
@@ -1001,6 +1002,162 @@ def send_run():
 @app.route("/send/status")
 def send_status():
     return jsonify(_send_job_snapshot())
+
+
+# ---------- Lead generation ----------
+_leadgen_lock = threading.Lock()
+_leadgen_job = {
+    "status": "idle",  # idle | running | done
+    "region": "", "categories": [],
+    "total": 0, "done": 0, "current": "", "error": "",
+    "results": [], "reported": True,
+}
+
+
+def _leadgen_snapshot() -> dict:
+    with _leadgen_lock:
+        snap = dict(_leadgen_job)
+        snap["results"] = list(_leadgen_job["results"])
+        return snap
+
+
+def _classify_candidate(cand: dict, existing: set, suppressed: set) -> str:
+    email = (cand.get("email") or "").strip()
+    e = email.lower()
+    if not email or not _valid_email(email):
+        return "no-email"
+    if e in existing:
+        return "duplicate"
+    if e in suppressed:
+        return "suppressed"
+    if not _domain_has_mail(e.rsplit("@", 1)[-1]):
+        return "bad-mx"
+    return "new"
+
+
+def _run_leadgen_job(region: str, categories: list, limit: int):
+    try:
+        bbox = leadgen.geocode_region(region)
+        if not bbox:
+            with _leadgen_lock:
+                _leadgen_job["error"] = f"Region '{region}' not found."
+            return
+        data = leadgen.fetch_overpass(leadgen.build_overpass_query(bbox, categories, limit))
+        candidates = leadgen.parse_overpass(data)[:limit]
+        existing = db.all_contact_emails()
+        suppressed = db.suppressed_emails()
+        with _leadgen_lock:
+            _leadgen_job.update(total=len(candidates), done=0)
+        results = []
+        for idx, cand in enumerate(candidates):
+            with _leadgen_lock:
+                _leadgen_job["current"] = cand["name"]
+                _leadgen_job["done"] = idx
+            # Enrich from the website only when OSM had no email on file.
+            if not cand["email"] and cand["website"]:
+                try:
+                    html = leadgen.fetch_site(cand["website"])
+                    emails = leadgen.extract_emails(html)
+                    if emails:
+                        cand["email"] = emails[0]
+                    cand["pos_system"] = leadgen.detect_pos(html)
+                except Exception:
+                    log.warning("Lead enrich failed: %s (%s)", cand["name"], cand["website"])
+            cand["state"] = _classify_candidate(cand, existing, suppressed)
+            if cand["state"] == "new":
+                existing.add(cand["email"].lower())  # dedupe within this run too
+            results.append(cand)
+            with _leadgen_lock:
+                _leadgen_job["results"] = list(results)
+        log.info("Lead-gen finished: %s candidates for '%s'", len(results), region)
+    except Exception as e:
+        log.exception("Lead-gen job crashed (region=%s)", region)
+        with _leadgen_lock:
+            _leadgen_job["error"] = str(e)
+    finally:
+        with _leadgen_lock:
+            _leadgen_job["status"] = "done"
+            _leadgen_job["current"] = ""
+
+
+@app.route("/leads")
+def leads_view():
+    job = _leadgen_snapshot()
+    return render_template(
+        "leads.html",
+        arten=db.list_arten(),
+        categories=sorted(leadgen.CATEGORY_FILTERS.keys()),
+        job=job if job["status"] in ("running", "done") else None,
+    )
+
+
+@app.route("/leads/run", methods=["POST"])
+def leads_run():
+    region = request.form.get("region", "").strip()
+    categories = [c for c in request.form.getlist("categories") if c in leadgen.CATEGORY_FILTERS]
+    try:
+        limit = max(1, min(int(request.form.get("limit", "25")), 60))
+    except ValueError:
+        limit = 25
+    if not region:
+        flash("Enter a region (city, district, …).", "error")
+        return redirect(url_for("leads_view"))
+    if not categories:
+        flash("Pick at least one business category.", "error")
+        return redirect(url_for("leads_view"))
+    with _leadgen_lock:
+        if _leadgen_job["status"] == "running":
+            flash("A lead search is already running — let it finish first.", "error")
+            return redirect(url_for("leads_view"))
+        _leadgen_job.update(
+            status="running", region=region, categories=categories,
+            total=0, done=0, current="", error="", results=[], reported=False,
+        )
+    log.info("Lead-gen started: region=%s categories=%s limit=%s", region, categories, limit)
+    threading.Thread(target=_run_leadgen_job, args=(region, categories, limit), daemon=True).start()
+    return redirect(url_for("leads_view"))
+
+
+@app.route("/leads/status")
+def leads_status():
+    return jsonify(_leadgen_snapshot())
+
+
+@app.route("/leads/import", methods=["POST"])
+def leads_import():
+    art = request.form.get("art", "").strip()
+    selected = set(request.form.getlist("email"))
+    if not art:
+        flash("Pick a type to assign the imported leads.", "error")
+        return redirect(url_for("leads_view"))
+    if not selected:
+        flash("No leads selected.", "error")
+        return redirect(url_for("leads_view"))
+    results = _leadgen_snapshot()["results"]
+    by_email = {c["email"]: c for c in results if c.get("email")}
+    if art not in set(db.list_arten()):
+        db.add_art(art)
+    existing = db.all_contact_emails()
+    suppressed = db.suppressed_emails()
+    added = 0
+    for email in selected:
+        cand = by_email.get(email)
+        if not cand:
+            continue
+        e = email.strip().lower()
+        if not _valid_email(email) or e in existing or e in suppressed:
+            continue
+        note = "Found via OpenStreetMap" + (f", {cand['city']}" if cand.get("city") else "")
+        db.add_contact(
+            firma=cand.get("name", ""), first_name="", last_name="",
+            email=email, art=art, notes=note,
+            pos_system=cand.get("pos_system", ""), source="osm",
+        )
+        existing.add(e)
+        added += 1
+    flash(f"Imported {added} lead{'' if added == 1 else 's'} as '{art}'.",
+          "success" if added else "error")
+    return redirect(url_for("leads_view"))
 
 
 # ---------- Settings ----------

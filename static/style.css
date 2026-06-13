@@ -449,6 +449,21 @@ p { margin: 0 0 12px; }
 }
 .chip:hover { border-color: var(--border-hover); color: var(--text); }
 .chip.active { background: var(--bg-elev); border-color: var(--border-hover); color: var(--text); }
+.check-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: transparent;
+    border: 1px solid var(--border-strong);
+    color: var(--text-dim);
+    font-size: 12.5px;
+    padding: 6px 12px;
+    border-radius: 99px;
+    cursor: pointer;
+    user-select: none;
+}
+.check-chip:hover { border-color: var(--border-hover); color: var(--text); }
+.check-chip input { accent-color: var(--accent); margin: 0; }
 mark.missing {
     background: rgba(245, 158, 11, 0.22);
     color: var(--warn);

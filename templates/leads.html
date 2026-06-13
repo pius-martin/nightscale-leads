@@ -1,0 +1,144 @@
+{% extends "base.html" %}
+{% block title %}Find leads · Nightscale{% endblock %}
+{% block content %}
+
+<div class="page-header">
+    <div>
+        <h1>Find leads</h1>
+        <div class="subtitle">Discover local businesses via OpenStreetMap, auto-detect their email and POS system, then import the good ones as contacts. Free, no API key.</div>
+    </div>
+</div>
+
+{% if not arten %}
+<div class="card">
+    <div class="empty">
+        <p>Create at least one type first — imported leads need a type.</p>
+        <a class="btn btn-primary" href="{{ url_for('types_view') }}">Manage types</a>
+    </div>
+</div>
+{% else %}
+
+<div class="card">
+    <div class="card-header"><h2>Search</h2></div>
+    <form action="{{ url_for('leads_run') }}" method="post" class="form" data-loading="Searching…">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="row" style="gap:14px">
+            <label class="flex-1" style="min-width:220px">Region
+                <input type="text" name="region" required autocomplete="off"
+                       placeholder="e.g. Bregenz, Vorarlberg" value="{{ job.region if job else '' }}">
+                <span class="hint">City, district or area — geocoded via OpenStreetMap.</span>
+            </label>
+            <label style="min-width:120px">Max results
+                <input type="number" name="limit" min="1" max="60" value="25">
+            </label>
+        </div>
+        <div>
+            <span class="hint" style="display:block; margin-bottom:8px">Business categories</span>
+            <div class="chip-bar">
+                {% for cat in categories %}
+                <label class="check-chip">
+                    <input type="checkbox" name="categories" value="{{ cat }}"
+                           {% if cat in ['restaurant','cafe','hotel'] %}checked{% endif %}>
+                    {{ cat|replace('_',' ')|capitalize }}
+                </label>
+                {% endfor %}
+            </div>
+        </div>
+        <div class="row">
+            <button type="submit" class="btn btn-primary">Search leads</button>
+        </div>
+        <span class="hint">Uses OpenStreetMap (Overpass) + the businesses' own websites. Respects fair-use; keep result counts modest.</span>
+    </form>
+</div>
+
+{% if job %}
+<div class="card mt">
+    <div class="card-header">
+        <h2>Results{% if job.region %} · {{ job.region }}{% endif %}</h2>
+        {% if job.status == 'running' %}<span class="badge dim" id="lead-progress-badge">{{ job.done }} / {{ job.total or '?' }}</span>{% endif %}
+    </div>
+
+    {% if job.status == 'running' %}
+    <div class="send-progress" id="lead-progress" data-status-url="{{ url_for('leads_status') }}">
+        <div class="send-progress-head">
+            <strong>Searching &amp; enriching…</strong>
+            <span class="mono muted" id="lead-count">{{ job.done }} / {{ job.total or '?' }}</span>
+        </div>
+        <div class="progress-track"><div class="progress-bar" id="lead-bar"></div></div>
+        <div class="muted" id="lead-current">{{ job.current }}</div>
+    </div>
+    {% elif job.error %}
+    <div class="banner warn"><span>Lead search failed: {{ job.error }}</span></div>
+    {% elif not job.results %}
+    <div class="empty"><p>No businesses found for that region/category.</p></div>
+    {% else %}
+    {% set new_results = job.results | selectattr('state','equalto','new') | list %}
+    <p class="muted" style="margin:0 0 14px">
+        Found <strong>{{ job.results|length }}</strong> businesses ·
+        <strong>{{ new_results|length }}</strong> importable (new, valid email).
+        The rest are duplicates, suppressed, or have no usable email.
+    </p>
+    <form action="{{ url_for('leads_import') }}" method="post">
+        <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
+        <div class="row" style="gap:10px; align-items:flex-end; margin-bottom:14px">
+            <label class="field" style="min-width:200px">
+                Import selected as type
+                <select name="art" required class="select-inline">
+                    {% for a in arten %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
+                </select>
+            </label>
+            <button type="submit" class="btn btn-primary" {% if not new_results %}disabled{% endif %}>Import selected</button>
+        </div>
+        <div class="table-wrap">
+        <table class="table">
+            <thead><tr><th></th><th>Business</th><th>Email</th><th>POS</th><th>City</th><th>Status</th></tr></thead>
+            <tbody>
+                {% for r in job.results %}
+                <tr>
+                    <td>{% if r.state == 'new' %}<input type="checkbox" name="email" value="{{ r.email }}" checked>{% endif %}</td>
+                    <td>{{ r.name }}{% if r.website %} · <a href="{{ r.website }}" target="_blank" rel="noopener" class="muted">site</a>{% endif %}</td>
+                    <td class="mono">{{ r.email or '—' }}</td>
+                    <td>{% if r.pos_system %}<span class="tag">{{ r.pos_system }}</span>{% else %}—{% endif %}</td>
+                    <td class="muted">{{ r.city or '—' }}</td>
+                    <td>
+                        {% if r.state == 'new' %}<span class="badge ok">new</span>
+                        {% elif r.state == 'duplicate' %}<span class="badge dim">duplicate</span>
+                        {% elif r.state == 'suppressed' %}<span class="badge err">suppressed</span>
+                        {% elif r.state == 'bad-mx' %}<span class="badge warn">no mail server</span>
+                        {% else %}<span class="badge dim">no email</span>{% endif %}
+                    </td>
+                </tr>
+                {% endfor %}
+            </tbody>
+        </table>
+        </div>
+    </form>
+    {% endif %}
+</div>
+{% endif %}
+{% endif %}
+
+{% endblock %}
+{% block scripts %}
+<script>
+(function() {
+    const panel = document.getElementById('lead-progress');
+    if (!panel) return;
+    const bar = document.getElementById('lead-bar');
+    const count = document.getElementById('lead-count');
+    const current = document.getElementById('lead-current');
+    async function poll() {
+        let job;
+        try {
+            job = await fetch(panel.dataset.statusUrl).then(r => r.json());
+        } catch (e) { setTimeout(poll, 3000); return; }
+        if (job.status !== 'running') { location.reload(); return; }
+        count.textContent = job.done + ' / ' + (job.total || '?');
+        bar.style.width = job.total ? Math.round(100 * job.done / job.total) + '%' : '0%';
+        current.textContent = job.current || '';
+        setTimeout(poll, 1500);
+    }
+    setTimeout(poll, 1500);
+})();
+</script>
+{% endblock %}

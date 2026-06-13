@@ -18,6 +18,7 @@ os.environ["APP_PASSWORD"] = ""
 
 import db
 import graph_mail
+import leadgen
 
 
 # ---------------------------------------------------------------------------
@@ -171,6 +172,18 @@ def get_csrf(client):
     client.get("/contacts")  # mints the token via inject_globals
     with client.session_transaction() as sess:
         return sess["_csrf"]
+
+
+def wait_job_done(client, url, timeout=10):
+    deadline = time.time() + timeout
+    while time.time() < deadline:
+        r = client.get(url)
+        if r.status_code == 404:
+            return
+        if (r.get_json() or {}).get("status") in ("done", "idle", None):
+            return
+        time.sleep(0.05)
+    raise SystemExit(f"job at {url} did not finish in time")
 
 
 def wait_send_done(client, timeout=10):
@@ -371,6 +384,52 @@ def main():
     })
     wait_send_done(c)
     ok(all(m["to"] != "skip@firma.at" for m in SENT_MAILS), "suppressed contact skipped on send")
+
+    # --- lead generation: pure helpers
+    ok(leadgen.detect_pos("Powered by LightSpeed POS") == "Lightspeed", "detect_pos finds system")
+    ok(leadgen.extract_emails("x a@b.com y a@b.com z d@e.org") == ["a@b.com", "d@e.org"],
+       "extract_emails dedupes")
+    ok("restaurant" in leadgen.build_overpass_query((1, 2, 3, 4), ["restaurant"], 5),
+       "overpass query builds")
+    parsed = leadgen.parse_overpass({"elements": [
+        {"tags": {"name": "X", "contact:email": "x@y.com"}}, {"tags": {}}]})
+    ok(len(parsed) == 1 and parsed[0]["email"] == "x@y.com", "parse_overpass keeps named + email")
+
+    # --- lead generation: full job with network mocked
+    leadgen.geocode_region = lambda region: (47.0, 9.0, 47.6, 10.0)
+    leadgen.fetch_overpass = lambda query: {"elements": [
+        {"type": "node", "tags": {"name": "Cafe Direct", "contact:email": "hallo@cafedirect.at"}},
+        {"type": "node", "tags": {"name": "Web Bistro", "website": "http://webbistro.at"}},
+    ]}
+    leadgen.fetch_site = lambda url, timeout=8: (
+        "<html><body>Kontakt <a href='mailto:office@webbistro.at'>mail</a> "
+        "powered by gastrofix</body></html>"
+    )
+    r = c.post("/leads/run", data={
+        "csrf_token": token, "region": "Bregenz", "categories": ["restaurant", "cafe"], "limit": "10",
+    }, follow_redirects=True)
+    ok(r.status_code == 200, "lead search starts")
+    wait_job_done(c, "/leads/status")
+    job = c.get("/leads/status").get_json()
+    ok(len(job["results"]) == 2, f"two candidates found (got {len(job['results'])})")
+    bistro = next(x for x in job["results"] if x["name"] == "Web Bistro")
+    ok(bistro["email"] == "office@webbistro.at", "email scraped from website")
+    ok(bistro["pos_system"] == "Gastrofix", "POS system detected from website")
+    ok(all(x["state"] == "new" for x in job["results"]), "both candidates classified new")
+
+    before = len(S.contacts)
+    c.post("/leads/import", data={
+        "csrf_token": token, "art": "Investor",
+        "email": ["hallo@cafedirect.at", "office@webbistro.at"],
+    })
+    ok(len(S.contacts) == before + 2, "selected leads imported as contacts")
+    imported = [x for x in S.contacts.values() if x["source"] == "osm"]
+    ok(any(x["pos_system"] == "Gastrofix" for x in imported), "imported lead keeps detected POS")
+    # re-importing the same leads must not duplicate
+    c.post("/leads/import", data={
+        "csrf_token": token, "art": "Investor", "email": ["hallo@cafedirect.at"],
+    })
+    ok(len(S.contacts) == before + 2, "duplicate lead import is a no-op")
 
     # --- contact delete
     cid = next(iter(S.contacts))

@@ -16,6 +16,7 @@
         </a>
         <nav class="nav">
             <a href="{{ url_for('contacts') }}" class="{% if request.endpoint in ['contacts','edit_contact'] %}active{% endif %}">Contacts</a>
+            <a href="{{ url_for('leads_view') }}" class="{% if request.endpoint == 'leads_view' %}active{% endif %}">Find leads</a>
             <a href="{{ url_for('types_view') }}" class="{% if request.endpoint == 'types_view' %}active{% endif %}">Types</a>
             <a href="{{ url_for('templates_view') }}" class="{% if request.endpoint == 'templates_view' %}active{% endif %}">Templates</a>
             <a href="{{ url_for('send_view') }}" class="{% if request.endpoint == 'send_view' %}active{% endif %}">Send</a>
