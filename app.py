@@ -305,6 +305,10 @@ _HEADER_ALIASES = {
     "last_name": {"last_name", "lastname", "last", "nachname", "surname"},
     "email": {"email", "e-mail", "mail", "e_mail"},
     "art": {"art", "type", "typ", "category", "kategorie", "tag"},
+    "pos_system": {
+        "pos_system", "pos", "possystem", "pos-system",
+        "kasse", "kassa", "kassensystem", "kassasystem", "kassensysteme",
+    },
     "notes": {"notes", "notizen", "note", "comment", "kommentar"},
 }
 
@@ -392,6 +396,7 @@ def _import_rows(rows: list[dict]) -> tuple[int, int, list[str]]:
             email=email,
             art=art,
             notes=r.get("notes", ""),
+            pos_system=r.get("pos_system", ""),
         )
         added += 1
     return added, skipped, errors
@@ -405,9 +410,10 @@ def contacts():
         form_errors = _validate_contact_form(request.form)
         if form_errors:
             items = db.list_contacts()
+            pos_systems = sorted({c["pos_system"] for c in items if c.get("pos_system")}, key=str.lower)
             return render_template(
                 "contacts.html", contacts=items, arten=arten,
-                form=request.form, form_errors=form_errors,
+                pos_systems=pos_systems, form=request.form, form_errors=form_errors,
             )
         art = request.form.get("art", "").strip()
         if art and art not in arten:
@@ -419,13 +425,16 @@ def contacts():
             email=request.form.get("email", ""),
             art=art,
             notes=request.form.get("notes", ""),
+            pos_system=request.form.get("pos_system", ""),
         )
         flash("Contact added.", "success")
         return redirect(url_for("contacts"))
     items = db.list_contacts()
+    pos_systems = sorted({c["pos_system"] for c in items if c.get("pos_system")}, key=str.lower)
     import_report = session.pop("import_report", None)
     return render_template(
-        "contacts.html", contacts=items, arten=arten, import_report=import_report,
+        "contacts.html", contacts=items, arten=arten,
+        pos_systems=pos_systems, import_report=import_report,
     )
 
 
@@ -475,7 +484,7 @@ def edit_contact(cid):
         if form_errors:
             # Re-render with the submitted (unsaved) values so nothing is lost
             submitted = dict(contact)
-            for k in ("firma", "first_name", "last_name", "email", "art", "notes"):
+            for k in ("firma", "first_name", "last_name", "email", "art", "notes", "pos_system"):
                 submitted[k] = request.form.get(k, "")
             return render_template(
                 "edit_contact.html", contact=submitted, arten=arten,
@@ -489,6 +498,7 @@ def edit_contact(cid):
             email=request.form.get("email", ""),
             art=request.form.get("art", ""),
             notes=request.form.get("notes", ""),
+            pos_system=request.form.get("pos_system", ""),
         )
         flash("Contact saved.", "success")
         return redirect(url_for("contacts"))

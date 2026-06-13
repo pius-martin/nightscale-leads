@@ -50,21 +50,21 @@ def install_fake_db():
     db.delete_art = lambda name: S.arten.remove(name) if name in S.arten else None
     db.art_usage_count = lambda name: sum(1 for c in S.contacts.values() if c["art"] == name)
 
-    def add_contact(firma, first_name, last_name, email, art, notes=""):
+    def add_contact(firma, first_name, last_name, email, art, notes="", pos_system=""):
         cid = S.next_cid
         S.next_cid += 1
         S.contacts[cid] = _full_name({
             "id": cid, "firma": firma.strip(), "first_name": first_name.strip(),
             "last_name": last_name.strip(), "email": email.strip(), "art": art.strip(),
-            "notes": notes.strip(), "created_at": None,
+            "pos_system": pos_system.strip(), "notes": notes.strip(), "created_at": None,
         })
     db.add_contact = add_contact
 
-    def update_contact(cid, firma, first_name, last_name, email, art, notes=""):
+    def update_contact(cid, firma, first_name, last_name, email, art, notes="", pos_system=""):
         S.contacts[cid].update(_full_name({
             "firma": firma.strip(), "first_name": first_name.strip(),
             "last_name": last_name.strip(), "email": email.strip(),
-            "art": art.strip(), "notes": notes.strip(),
+            "art": art.strip(), "pos_system": pos_system.strip(), "notes": notes.strip(),
         }))
     db.update_contact = update_contact
 
@@ -209,9 +209,11 @@ def main():
     # --- contacts: add (valid), add (invalid email), edit, delete
     r = c.post("/contacts", data={
         "csrf_token": token, "firma": "Acme GmbH", "first_name": "Jane",
-        "last_name": "Doe", "email": "jane@acme.com", "art": "Investor", "notes": "",
+        "last_name": "Doe", "email": "jane@acme.com", "art": "Investor",
+        "pos_system": "Lightspeed", "notes": "",
     }, follow_redirects=True)
     ok(len(S.contacts) == 1, "valid contact added")
+    ok(next(iter(S.contacts.values()))["pos_system"] == "Lightspeed", "pos_system stored on add")
 
     r = c.post("/contacts", data={
         "csrf_token": token, "firma": "Bad Co", "email": "not-an-email", "art": "Investor",
@@ -234,10 +236,10 @@ def main():
 
     # --- import: good + bad rows -> import report
     csv_data = (
-        "company,first_name,last_name,email,type,notes\n"
-        "Beta Holdings,,,info@beta.com,Investor,\n"
-        "NoMail GmbH,,,,Investor,\n"
-        "BadMail AG,,,not-an-email,Investor,\n"
+        "company,first_name,last_name,email,type,pos_system,notes\n"
+        "Beta Holdings,,,info@beta.com,Investor,Vectron,\n"
+        "NoMail GmbH,,,,Investor,,\n"
+        "BadMail AG,,,not-an-email,Investor,,\n"
     )
     r = c.post("/contacts/import", data={
         "csrf_token": token, "file": (io.BytesIO(csv_data.encode()), "import.csv"),
@@ -245,6 +247,7 @@ def main():
     ok(b"Import report" in r.data, "import report rendered")
     ok(b"missing email" in r.data and b"invalid email" in r.data, "import errors listed in full")
     ok(len(S.contacts) == 2, "1 of 3 import rows added")
+    ok(any(x["pos_system"] == "Vectron" for x in S.contacts.values()), "pos_system imported from CSV")
 
     # --- types
     c.post("/types", data={"csrf_token": token, "name": "Partner"})

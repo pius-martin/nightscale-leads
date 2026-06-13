@@ -35,6 +35,10 @@
                 {% endif %}
             </select>
         </label>
+        <label>POS system
+            <input type="text" name="pos_system" value="{{ contact.pos_system }}" placeholder="e.g. Lightspeed, Vectron, Gastrofix">
+            <span class="hint">Optional — point-of-sale system, used for segmenting.</span>
+        </label>
         <label>Notes
             <textarea name="notes" rows="3">{{ contact.notes }}</textarea>
         </label>

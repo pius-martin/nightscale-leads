@@ -23,6 +23,7 @@ CREATE TABLE IF NOT EXISTS contacts (
     last_name TEXT NOT NULL DEFAULT '',
     email TEXT NOT NULL,
     art TEXT NOT NULL,
+    pos_system TEXT NOT NULL DEFAULT '',
     notes TEXT DEFAULT '',
     created_at TIMESTAMPTZ DEFAULT NOW()
 );
@@ -72,6 +73,7 @@ MIGRATIONS = """
 -- Ensure new columns exist on legacy tables
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS first_name TEXT NOT NULL DEFAULT '';
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pos_system TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS footer TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'personal';
 
@@ -194,19 +196,19 @@ def list_contacts(art: str | None = None):
         return [_attach_full_name(dict(r)) for r in cur.fetchall()]
 
 
-def add_contact(firma, first_name, last_name, email, art, notes=""):
+def add_contact(firma, first_name, last_name, email, art, notes="", pos_system=""):
     with get_conn() as c, c.cursor() as cur:
         cur.execute(
-            "INSERT INTO contacts (firma, first_name, last_name, email, art, notes) VALUES (%s, %s, %s, %s, %s, %s)",
-            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), notes.strip()),
+            "INSERT INTO contacts (firma, first_name, last_name, email, art, pos_system, notes) VALUES (%s, %s, %s, %s, %s, %s, %s)",
+            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), pos_system.strip(), notes.strip()),
         )
 
 
-def update_contact(cid, firma, first_name, last_name, email, art, notes=""):
+def update_contact(cid, firma, first_name, last_name, email, art, notes="", pos_system=""):
     with get_conn() as c, c.cursor() as cur:
         cur.execute(
-            "UPDATE contacts SET firma=%s, first_name=%s, last_name=%s, email=%s, art=%s, notes=%s WHERE id=%s",
-            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), notes.strip(), cid),
+            "UPDATE contacts SET firma=%s, first_name=%s, last_name=%s, email=%s, art=%s, pos_system=%s, notes=%s WHERE id=%s",
+            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), pos_system.strip(), notes.strip(), cid),
         )
 
 

@@ -54,6 +54,16 @@
                 {% if form_errors and form_errors.art %}<span class="field-error">{{ form_errors.art }}</span>{% endif %}
             </label>
         </div>
+        <label>POS system
+            <input type="text" name="pos_system" autocomplete="off" placeholder="e.g. Lightspeed, Vectron, Gastrofix"
+                   value="{{ form.pos_system if form else '' }}" list="pos-options">
+            <span class="hint">Optional — which point-of-sale system they use, if known. Used for segmenting campaigns.</span>
+        </label>
+        {% if pos_systems %}
+        <datalist id="pos-options">
+            {% for p in pos_systems %}<option value="{{ p }}">{% endfor %}
+        </datalist>
+        {% endif %}
         <label>Notes
             <textarea name="notes" rows="2" placeholder="Optional">{{ form.notes if form else '' }}</textarea>
         </label>
@@ -127,6 +137,11 @@
                 <td class="mono">Doe</td>
             </tr>
             <tr>
+                <td class="mono">pos_system</td>
+                <td><span class="badge dim">optional</span></td>
+                <td class="mono">Lightspeed</td>
+            </tr>
+            <tr>
                 <td class="mono">notes</td>
                 <td><span class="badge dim">optional</span></td>
                 <td>Met at conference</td>
@@ -159,6 +174,13 @@
                 <option value="">All types</option>
                 {% for a in arten %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
             </select>
+            {% if pos_systems %}
+            <select id="contact-pos-filter" class="select-inline" aria-label="Filter by POS system">
+                <option value="">All POS</option>
+                {% for p in pos_systems %}<option value="{{ p }}">{{ p }}</option>{% endfor %}
+                <option value="__none__">— no POS —</option>
+            </select>
+            {% endif %}
         </div>
         {% endif %}
     </div>
@@ -172,17 +194,19 @@
                 <th>Last name</th>
                 <th>Email</th>
                 <th>Type</th>
+                <th>POS</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
             {% for c in contacts %}
-            <tr data-firma="{{ c.firma|lower }}" data-firstname="{{ c.first_name|lower }}" data-lastname="{{ c.last_name|lower }}" data-email="{{ c.email|lower }}" data-art="{{ c.art }}">
+            <tr data-firma="{{ c.firma|lower }}" data-firstname="{{ c.first_name|lower }}" data-lastname="{{ c.last_name|lower }}" data-email="{{ c.email|lower }}" data-art="{{ c.art }}" data-pos="{{ c.pos_system or '' }}" data-possearch="{{ c.pos_system|lower }}">
                 <td>{{ c.firma }}</td>
                 <td>{{ c.first_name }}</td>
                 <td>{{ c.last_name }}</td>
                 <td class="mono">{{ c.email }}</td>
                 <td><span class="tag">{{ c.art }}</span></td>
+                <td>{% if c.pos_system %}<span class="tag">{{ c.pos_system }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
                 <td class="actions">
                     <a class="btn btn-ghost btn-sm" href="{{ url_for('edit_contact', cid=c.id) }}">Edit</a>
                     <form action="{{ url_for('delete_contact', cid=c.id) }}" method="post" data-confirm="Delete this contact?" style="display:inline"><input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -206,6 +230,7 @@
 (function() {
     const search = document.getElementById('contact-search');
     const filter = document.getElementById('contact-filter');
+    const posFilter = document.getElementById('contact-pos-filter');
     const table = document.getElementById('contacts-table');
     const emptyMsg = document.getElementById('contacts-empty-result');
     if (!table || !search || !filter) return;
@@ -214,11 +239,15 @@
     function apply() {
         const q = search.value.trim().toLowerCase();
         const t = filter.value;
+        const p = posFilter ? posFilter.value : '';
         let visible = 0;
         rows.forEach(r => {
-            const matchesQ = !q || ['firma','firstname','lastname','email'].some(k => (r.dataset[k] || '').includes(q));
+            const matchesQ = !q || ['firma','firstname','lastname','email','possearch'].some(k => (r.dataset[k] || '').includes(q));
             const matchesT = !t || r.dataset.art === t;
-            const show = matchesQ && matchesT;
+            let matchesP = true;
+            if (p === '__none__') matchesP = !(r.dataset.pos || '').trim();
+            else if (p) matchesP = r.dataset.pos === p;
+            const show = matchesQ && matchesT && matchesP;
             r.style.display = show ? '' : 'none';
             if (show) visible++;
         });
@@ -226,6 +255,7 @@
     }
     search.addEventListener('input', apply);
     filter.addEventListener('change', apply);
+    if (posFilter) posFilter.addEventListener('change', apply);
 })();
 </script>
 {% endblock %}
