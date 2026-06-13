@@ -1,10 +1,14 @@
 import json
+import logging
 import os
 import threading
+import time
 import msal
 import requests
 
 import db as _db
+
+logger = logging.getLogger("nightscale.graph")
 
 GRAPH_BASE = "https://graph.microsoft.com/v1.0"
 SCOPES = ["Mail.Send"]
@@ -12,6 +16,9 @@ LEGACY_CACHE_KEY = "msal_token_cache"
 
 _lock = threading.Lock()
 _pending_flow = None  # (app, cache, flow)
+# Tracks the most recent device-code flow so the UI can report why a sign-in
+# failed instead of polling forever. Guarded by _lock.
+_flow_state = {"status": "idle", "error": None, "username": None, "expires_at": 0.0}
 
 
 # ---------------------------------------------------------------------------
@@ -61,12 +68,13 @@ def _load_account_cache(username: str) -> msal.SerializableTokenCache:
     try:
         blob = _db.get_ms_account_cache(username)
     except Exception:
+        logger.exception("Could not load token cache for %s", username)
         blob = ""
     if blob:
         try:
             cache.deserialize(blob)
         except Exception:
-            pass
+            logger.exception("Corrupt token cache for %s; starting empty", username)
     return cache
 
 
@@ -83,7 +91,7 @@ def _save_account_cache(username: str, cache: msal.SerializableTokenCache, home_
                     break
         _db.upsert_ms_account(username, hid or "", cache.serialize())
     except Exception:
-        pass
+        logger.exception("Could not persist token cache for %s", username)
 
 
 def _build_app_with_cache(cache: msal.SerializableTokenCache):
@@ -138,22 +146,51 @@ def get_token_for(username: str | None = None) -> str | None:
     return None
 
 
+def get_flow_state() -> dict:
+    with _lock:
+        state = dict(_flow_state)
+    state["expired"] = bool(
+        state["status"] == "pending" and state["expires_at"] and time.time() > state["expires_at"]
+    )
+    return state
+
+
 def start_device_flow():
     """Begin a device-code flow with a FRESH empty cache so the new account
-    is added independently of any existing accounts."""
+    is added independently of any existing accounts. If a flow is already
+    pending and not expired, return it again instead of starting a new one —
+    this dedupes double-clicks and stops /auth/start spam."""
     global _pending_flow
     with _lock:
+        if (
+            _pending_flow is not None
+            and _flow_state["status"] == "pending"
+            and time.time() < _flow_state["expires_at"]
+        ):
+            _, _, flow = _pending_flow
+            return {
+                "user_code": flow["user_code"],
+                "verification_uri": flow["verification_uri"],
+                "message": flow["message"],
+                "expires_in": max(1, int(_flow_state["expires_at"] - time.time())),
+            }
         cache = msal.SerializableTokenCache()
         app = _build_app_with_cache(cache)
         flow = app.initiate_device_flow(scopes=SCOPES)
         if "user_code" not in flow:
+            logger.error("Device flow start failed: %s", flow)
             raise RuntimeError(f"Failed to start device flow: {flow}")
+        expires_in = int(flow.get("expires_in", 900))
         _pending_flow = (app, cache, flow)
+        _flow_state.update(
+            status="pending", error=None, username=None,
+            expires_at=time.time() + expires_in,
+        )
         return {
             "user_code": flow["user_code"],
             "verification_uri": flow["verification_uri"],
             "message": flow["message"],
-            "expires_in": flow.get("expires_in", 900),
+            "expires_in": expires_in,
         }
 
 
@@ -163,8 +200,13 @@ def complete_device_flow():
         if _pending_flow is None:
             return False
         app, cache, flow = _pending_flow
-    result = app.acquire_token_by_device_flow(flow)
+    try:
+        result = app.acquire_token_by_device_flow(flow)
+    except Exception as e:
+        logger.exception("Device flow blew up")
+        result = {"error": "exception", "error_description": str(e)}
     success = "access_token" in result
+    username = None
     if success:
         msal_accounts = app.get_accounts()
         if msal_accounts:
@@ -174,9 +216,24 @@ def complete_device_flow():
             try:
                 _db.upsert_ms_account(username, home_id, cache.serialize())
             except Exception:
-                pass
+                logger.exception("Could not persist new account %s after sign-in", username)
+        logger.info("Device flow completed for %s", username)
+    else:
+        logger.warning(
+            "Device flow failed: %s — %s",
+            result.get("error"), result.get("error_description"),
+        )
     with _lock:
         _pending_flow = None
+        if success:
+            _flow_state.update(status="success", error=None, username=username, expires_at=0.0)
+        else:
+            _flow_state.update(
+                status="error",
+                error=result.get("error_description") or result.get("error") or "Sign-in failed.",
+                username=None,
+                expires_at=0.0,
+            )
     return success
 
 
@@ -188,7 +245,7 @@ def sign_out(username: str | None = None):
         else:
             _db.delete_all_ms_accounts()
     except Exception:
-        pass
+        logger.exception("Sign-out failed for %s", username or "<all accounts>")
 
 
 def send_mail(

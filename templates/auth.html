@@ -37,6 +37,7 @@
     </p>
 
     <button id="start-btn" class="btn btn-primary">Start sign-in</button>
+    <div id="flow-error" class="flash error" role="alert" hidden style="margin:14px 0 0"></div>
 
     <div id="flow-info" class="flow-info" hidden>
         <div>
@@ -65,20 +66,42 @@
 {% endblock %}
 {% block scripts %}
 <script>
-const startBtn = document.getElementById('start-btn');
-const initialUsernames = new Set({{ ms_accounts | map(attribute='username') | list | tojson }});
-if (startBtn) {
+(function() {
+    const startBtn = document.getElementById('start-btn');
+    const errorEl = document.getElementById('flow-error');
+    const initialUsernames = new Set({{ ms_accounts | map(attribute='username') | list | tojson }});
+    if (!startBtn) return;
+
+    function showError(msg) {
+        errorEl.textContent = msg;
+        errorEl.hidden = false;
+    }
+
+    function resetStart(label) {
+        startBtn.disabled = false;
+        startBtn.hidden = false;
+        startBtn.textContent = label || 'Start sign-in';
+        document.getElementById('flow-info').hidden = true;
+    }
+
     startBtn.addEventListener('click', async () => {
         startBtn.disabled = true;
         startBtn.textContent = 'Starting…';
-        const r = await fetch('{{ url_for("auth_start") }}', {method: 'POST'});
-        if (!r.ok) {
-            startBtn.disabled = false;
-            startBtn.textContent = 'Start sign-in';
-            alert('Failed to start sign-in.');
+        errorEl.hidden = true;
+        let data;
+        try {
+            const r = await fetch('{{ url_for("auth_start") }}', {method: 'POST'});
+            data = await r.json().catch(() => ({}));
+            if (!r.ok) {
+                resetStart();
+                showError(data.error || ('Failed to start sign-in (HTTP ' + r.status + ').'));
+                return;
+            }
+        } catch (e) {
+            resetStart();
+            showError('Failed to start sign-in: ' + e.message);
             return;
         }
-        const data = await r.json();
         document.getElementById('flow-info').hidden = false;
         startBtn.hidden = true;
         const urlEl = document.getElementById('flow-url');
@@ -92,17 +115,37 @@ if (startBtn) {
         });
 
         const status = document.getElementById('flow-status');
+        const deadline = Date.now() + (data.expires_in || 900) * 1000;
         const poll = setInterval(async () => {
-            const s = await fetch('{{ url_for("auth_status") }}').then(r => r.json());
-            // Look for any new account that was not present before
+            const minsLeft = Math.max(0, Math.ceil((deadline - Date.now()) / 60000));
+            status.textContent = 'Waiting for sign-in… (code valid ~' + minsLeft + ' min)';
+            let s;
+            try {
+                s = await fetch('{{ url_for("auth_status") }}').then(r => r.json());
+            } catch (e) {
+                return; // transient network error — keep polling
+            }
             const newOnes = (s.accounts || []).filter(u => !initialUsernames.has(u));
             if (newOnes.length > 0) {
                 clearInterval(poll);
                 status.textContent = 'Connected as ' + newOnes[0] + '. Redirecting…';
                 setTimeout(() => location.href = '{{ url_for("settings_view") }}', 800);
+                return;
+            }
+            const flow = s.flow || {};
+            if (flow.status === 'error') {
+                clearInterval(poll);
+                resetStart('Try again');
+                showError('Sign-in failed: ' + (flow.error || 'unknown error'));
+                return;
+            }
+            if (Date.now() > deadline || flow.expired) {
+                clearInterval(poll);
+                resetStart('Start again');
+                showError('The code expired before the sign-in finished. Start again to get a new code.');
             }
         }, 2500);
     });
-}
+})();
 </script>
 {% endblock %}

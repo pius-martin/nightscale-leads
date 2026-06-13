@@ -1,6 +1,7 @@
 import csv
 import hmac
 import io
+import logging
 import os
 import random
 import re
@@ -15,6 +16,12 @@ import db
 import graph_mail
 
 load_dotenv()
+
+logging.basicConfig(
+    level=logging.INFO,
+    format="%(asctime)s %(levelname)s %(name)s: %(message)s",
+)
+log = logging.getLogger("nightscale")
 
 app = Flask(__name__)
 app.secret_key = os.environ.get("FLASK_SECRET_KEY", "dev-key-change-me")
@@ -71,6 +78,7 @@ def _ensure_db():
             _db_ready["ok"] = True
             _db_ready["error"] = None
         except Exception as e:
+            log.exception("Database initialization failed")
             _db_ready["error"] = str(e)
             return _db_ready["error"]
     return None
@@ -158,6 +166,7 @@ def inject_globals():
         account = accounts[0]["username"] if accounts else None
         settings = db.all_settings() if _db_ready["ok"] else {}
     except Exception:
+        log.exception("inject_globals failed; rendering without account/settings context")
         accounts, signed_in, account, settings = [], False, None, {}
     return {
         "signed_in": signed_in,
@@ -368,6 +377,7 @@ def contacts_import():
             flash("Unsupported file type. Use .csv or .xlsx.", "error")
             return redirect(url_for("contacts"))
     except Exception as e:
+        log.exception("Import file parse failed: %s", file.filename)
         flash(f"Could not parse file: {e}", "error")
         return redirect(url_for("contacts"))
     added, skipped, errors = _import_rows(rows)
@@ -508,6 +518,7 @@ def template_test_send():
         who = f"{contact['first_name']} {contact['last_name']} · {contact['firma']}".strip(" ·")
         flash(f"Test sent to {account} (rendered as: {who}).", "success")
     except Exception as e:
+        log.exception("Test send failed (art=%s, variant=%s, account=%s)", art, variant, account)
         flash(f"Test send failed: {e}", "error")
     return redirect(url_for("templates_view", art=art, variant=variant))
 
@@ -702,6 +713,7 @@ def send_run():
             db.log_send(c["id"], c["email"], art, subject, "sent")
             sent += 1
         except Exception as e:
+            log.exception("Send failed (contact=%s, email=%s, art=%s)", c["id"], c["email"], art)
             db.log_send(c["id"], c["email"], art, subject, "failed", str(e))
             failed += 1
     parts = [f"Sent {sent}"]
@@ -775,6 +787,7 @@ def auth_status():
         "signed_in": bool(accs),
         "account": accs[0]["username"] if accs else None,
         "accounts": [a["username"] for a in accs],
+        "flow": graph_mail.get_flow_state(),
     })
 
 
