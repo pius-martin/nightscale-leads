@@ -7,6 +7,8 @@ the parsing/detection logic is pure and unit-testable.
 """
 import logging
 import re
+from html import unescape
+from urllib.parse import urljoin
 
 import requests
 
@@ -138,3 +140,59 @@ def fetch_site(url: str, timeout: int = 8) -> str:
         url = "https://" + url
     r = requests.get(url, headers={"User-Agent": USER_AGENT}, timeout=timeout)
     return r.text[:500000]
+
+
+# --- Deep scraping for enrichment ---
+_SUBPAGE_HINTS = ("impressum", "kontakt", "contact", "team", "ueber-uns",
+                  "ueber_uns", "about", "ueberuns", "standorte", "filialen")
+_HREF_RE = re.compile(r'href=["\']([^"\'#]+)["\']', re.I)
+_TAG_RE = re.compile(r"<(script|style)[^>]*>.*?</\1>", re.I | re.S)
+_HTML_TAG_RE = re.compile(r"<[^>]+>")
+_WS_RE = re.compile(r"[ \t\r\f\v]+")
+_BLANKLINES_RE = re.compile(r"\n\s*\n+")
+
+
+def find_subpages(home_html: str, base_url: str, limit: int = 4) -> list[str]:
+    """Pull links that look like Impressum/Kontakt/Team/About/locations pages."""
+    if not base_url.startswith(("http://", "https://")):
+        base_url = "https://" + base_url
+    found, seen = [], set()
+    for href in _HREF_RE.findall(home_html or ""):
+        low = href.lower()
+        if not any(h in low for h in _SUBPAGE_HINTS):
+            continue
+        url = urljoin(base_url, href)
+        if not url.startswith("http"):
+            continue
+        if url in seen:
+            continue
+        seen.add(url)
+        found.append(url)
+        if len(found) >= limit:
+            break
+    return found
+
+
+def html_to_text(html: str) -> str:
+    text = _TAG_RE.sub(" ", html or "")
+    text = _HTML_TAG_RE.sub(" ", text)
+    text = unescape(text)
+    text = _WS_RE.sub(" ", text)
+    text = _BLANKLINES_RE.sub("\n", text)
+    return text.strip()
+
+
+def collect_site_text(website: str, max_chars: int = 30000) -> str:
+    """Fetch homepage + a few key subpages, return cleaned, length-capped text.
+    Each page is labelled so the enricher knows where text came from (the
+    Impressum block is where the managing director legally must appear)."""
+    if not website:
+        return ""
+    home = fetch_site(website)
+    parts = [f"# PAGE: {website}\n{html_to_text(home)}"]
+    for sub in find_subpages(home, website):
+        try:
+            parts.append(f"# PAGE: {sub}\n{html_to_text(fetch_site(sub))}")
+        except Exception:
+            logger.warning("subpage fetch failed: %s", sub)
+    return "\n\n".join(parts)[:max_chars]

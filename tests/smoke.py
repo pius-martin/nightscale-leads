@@ -52,16 +52,20 @@ def install_fake_db():
     db.delete_art = lambda name: S.arten.remove(name) if name in S.arten else None
     db.art_usage_count = lambda name: sum(1 for c in S.contacts.values() if c["art"] == name)
 
-    def add_contact(firma, first_name, last_name, email, art, notes="", pos_system="", source=""):
+    def add_contact(firma, first_name, last_name, email, art, notes="", pos_system="",
+                    source="", role="", employees="", revenue="", locations="", website=""):
         cid = S.next_cid
         S.next_cid += 1
         S.contacts[cid] = _full_name({
             "id": cid, "firma": firma.strip(), "first_name": first_name.strip(),
             "last_name": last_name.strip(), "email": email.strip(), "art": art.strip(),
             "pos_system": pos_system.strip(), "status": "new", "source": source.strip(),
+            "role": role.strip(), "employees": employees.strip(), "revenue": revenue.strip(),
+            "locations": str(locations).strip(), "website": website.strip(),
             "notes": notes.strip(), "created_at": None,
         })
     db.add_contact = add_contact
+    db.list_contact_roles = lambda: sorted({c.get("role") for c in S.contacts.values() if c.get("role")})
     db.all_contact_emails = lambda: {c["email"].lower() for c in S.contacts.values()}
     db.set_contact_status = lambda cid, status: S.contacts[cid].update(status=status)
     db.add_suppression = lambda email, reason="": S.suppression.__setitem__((email or "").strip().lower(), reason)
@@ -70,11 +74,15 @@ def install_fake_db():
     db.suppressed_emails = lambda: set(S.suppression)
     db.list_suppression = lambda: [{"email": e, "reason": r, "created_at": None} for e, r in S.suppression.items()]
 
-    def update_contact(cid, firma, first_name, last_name, email, art, notes="", pos_system=""):
+    def update_contact(cid, firma, first_name, last_name, email, art, notes="", pos_system="",
+                       role="", employees="", revenue="", locations="", website=""):
         S.contacts[cid].update(_full_name({
             "firma": firma.strip(), "first_name": first_name.strip(),
             "last_name": last_name.strip(), "email": email.strip(),
-            "art": art.strip(), "pos_system": pos_system.strip(), "notes": notes.strip(),
+            "art": art.strip(), "pos_system": pos_system.strip(), "role": role.strip(),
+            "employees": employees.strip(), "revenue": revenue.strip(),
+            "locations": str(locations).strip(), "website": website.strip(),
+            "notes": notes.strip(),
         }))
     db.update_contact = update_contact
 
@@ -395,41 +403,75 @@ def main():
         {"tags": {"name": "X", "contact:email": "x@y.com"}}, {"tags": {}}]})
     ok(len(parsed) == 1 and parsed[0]["email"] == "x@y.com", "parse_overpass keeps named + email")
 
-    # --- lead generation: full job with network mocked
+    # --- ClaudeEnricher mapping (mocked SDK client, no network/key)
+    import enrich as enrich_mod
+
+    class _FakeContact:
+        def __init__(self, **kw): self.__dict__.update(kw)
+
+    class _FakeExtract:
+        legal_name = "Web Bistro GmbH"; industry = "Gastronomy"
+        employees = "11-50"; revenue = "€2M"; locations = "2"; pos_system = "Lightspeed"
+        contacts = [
+            _FakeContact(name="Max Huber", role="Geschäftsführer", email="max@wb.at", phone=""),
+            _FakeContact(name="", role="weird-role", email="", phone=""),  # dropped (no email)
+        ]
+
+    class _FakeParse:
+        parsed_output = _FakeExtract()
+
+    ce = enrich_mod.ClaudeEnricher.__new__(enrich_mod.ClaudeEnricher)
+    ce._model, ce._web_search = "claude-opus-4-8", False
+    ce._client = type("C", (), {"messages": type("M", (), {"parse": staticmethod(lambda **kw: _FakeParse())})()})()
+    mapped = ce.enrich({"name": "Web Bistro"}, "irrelevant text")
+    ok(mapped["employees"] == "11-50" and mapped["pos_system"] == "Lightspeed", "ClaudeEnricher maps firmographics")
+    ok(len(mapped["contacts"]) == 1, "ClaudeEnricher drops contacts without email")
+    ok(mapped["contacts"][0]["role"] == "geschaeftsfuehrung", "ClaudeEnricher normalizes role label")
+
+    # --- lead generation: full job with network mocked (FreeRegexEnricher path,
+    #     since no ANTHROPIC_API_KEY is set in the test environment)
     leadgen.geocode_region = lambda region: (47.0, 9.0, 47.6, 10.0)
     leadgen.fetch_overpass = lambda query: {"elements": [
         {"type": "node", "tags": {"name": "Cafe Direct", "contact:email": "hallo@cafedirect.at"}},
         {"type": "node", "tags": {"name": "Web Bistro", "website": "http://webbistro.at"}},
     ]}
-    leadgen.fetch_site = lambda url, timeout=8: (
-        "<html><body>Kontakt <a href='mailto:office@webbistro.at'>mail</a> "
-        "powered by gastrofix</body></html>"
+    impressum = (
+        "Impressum. UID-Nummer: ATU12345678. Unser Team besteht aus 25 Mitarbeiter. "
+        "Website powered by gastrofix. "
+        "Geschäftsführer Max Huber. E-Mail: max@webbistro.at . "
+        + ("Lorem ipsum dolor sit amet consectetur adipiscing elit. " * 6)
+        + "Leitung Marketing Lisa Berger. E-Mail: marketing@webbistro.at ."
     )
+    leadgen.collect_site_text = lambda website, max_chars=30000: impressum
     r = c.post("/leads/run", data={
         "csrf_token": token, "region": "Bregenz", "categories": ["restaurant", "cafe"], "limit": "10",
     }, follow_redirects=True)
     ok(r.status_code == 200, "lead search starts")
     wait_job_done(c, "/leads/status")
     job = c.get("/leads/status").get_json()
-    ok(len(job["results"]) == 2, f"two candidates found (got {len(job['results'])})")
+    ok(len(job["results"]) == 2, f"two businesses found (got {len(job['results'])})")
     bistro = next(x for x in job["results"] if x["name"] == "Web Bistro")
-    ok(bistro["email"] == "office@webbistro.at", "email scraped from website")
-    ok(bistro["pos_system"] == "Gastrofix", "POS system detected from website")
-    ok(all(x["state"] == "new" for x in job["results"]), "both candidates classified new")
+    ok(bistro["employees"] == "25", "employee count extracted from Impressum")
+    ok(bistro["pos_system"] == "Gastrofix", "POS system detected")
+    gf = next((c2 for c2 in bistro["contacts"] if c2["role"] == "geschaeftsfuehrung"), None)
+    ok(gf and gf["email"] == "max@webbistro.at", "managing director contact extracted with role")
+    ok(gf and gf["name"] == "Max Huber", "managing director name extracted")
+    ok(any(c2["role"] == "marketing" and c2["email"] == "marketing@webbistro.at"
+           for c2 in bistro["contacts"]), "marketing contact extracted with role")
+    cafe = next(x for x in job["results"] if x["name"] == "Cafe Direct")
+    ok(any(c2["email"] == "hallo@cafedirect.at" for c2 in cafe["contacts"]), "OSM email folded in as contact")
 
     before = len(S.contacts)
-    c.post("/leads/import", data={
-        "csrf_token": token, "art": "Investor",
-        "email": ["hallo@cafedirect.at", "office@webbistro.at"],
-    })
-    ok(len(S.contacts) == before + 2, "selected leads imported as contacts")
-    imported = [x for x in S.contacts.values() if x["source"] == "osm"]
-    ok(any(x["pos_system"] == "Gastrofix" for x in imported), "imported lead keeps detected POS")
-    # re-importing the same leads must not duplicate
-    c.post("/leads/import", data={
-        "csrf_token": token, "art": "Investor", "email": ["hallo@cafedirect.at"],
-    })
-    ok(len(S.contacts) == before + 2, "duplicate lead import is a no-op")
+    new_rows = [c2["row"] for b in job["results"] for c2 in b["contacts"] if c2["state"] == "new"]
+    ok(len(new_rows) == 3, f"three importable contacts (got {len(new_rows)})")
+    c.post("/leads/import", data={"csrf_token": token, "art": "Investor", "row": new_rows})
+    ok(len(S.contacts) == before + 3, "selected lead contacts imported")
+    imported = [x for x in S.contacts.values() if x["source"] == "osm+web"]
+    ok(any(x["role"] == "geschaeftsfuehrung" and x["employees"] == "25" for x in imported),
+       "imported GF contact keeps role + firmographics")
+    # re-importing the same rows must not duplicate
+    c.post("/leads/import", data={"csrf_token": token, "art": "Investor", "row": new_rows})
+    ok(len(S.contacts) == before + 3, "duplicate lead import is a no-op")
 
     # --- contact delete
     cid = next(iter(S.contacts))

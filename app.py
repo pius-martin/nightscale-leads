@@ -20,6 +20,7 @@ from dotenv import load_dotenv
 import db
 import graph_mail
 import leadgen
+import enrich
 
 load_dotenv()
 
@@ -498,9 +499,11 @@ def contacts():
         if form_errors:
             items = db.list_contacts()
             pos_systems = sorted({c["pos_system"] for c in items if c.get("pos_system")}, key=str.lower)
+            roles = sorted({c["role"] for c in items if c.get("role")})
             return render_template(
                 "contacts.html", contacts=items, arten=arten,
-                pos_systems=pos_systems, form=request.form, form_errors=form_errors,
+                pos_systems=pos_systems, roles=roles, role_labels=enrich.ROLE_LABELS,
+                form=request.form, form_errors=form_errors,
             )
         art = request.form.get("art", "").strip()
         if art and art not in arten:
@@ -518,10 +521,12 @@ def contacts():
         return redirect(url_for("contacts"))
     items = db.list_contacts()
     pos_systems = sorted({c["pos_system"] for c in items if c.get("pos_system")}, key=str.lower)
+    roles = sorted({c["role"] for c in items if c.get("role")})
     import_report = session.pop("import_report", None)
     return render_template(
         "contacts.html", contacts=items, arten=arten,
-        pos_systems=pos_systems, import_report=import_report,
+        pos_systems=pos_systems, roles=roles, role_labels=enrich.ROLE_LABELS,
+        import_report=import_report,
     )
 
 
@@ -575,7 +580,7 @@ def edit_contact(cid):
                 submitted[k] = request.form.get(k, "")
             return render_template(
                 "edit_contact.html", contact=submitted, arten=arten,
-                form_errors=form_errors,
+                form_errors=form_errors, role_labels=enrich.ROLE_LABELS,
             )
         db.update_contact(
             cid,
@@ -586,10 +591,16 @@ def edit_contact(cid):
             art=request.form.get("art", ""),
             notes=request.form.get("notes", ""),
             pos_system=request.form.get("pos_system", ""),
+            role=request.form.get("role", ""),
+            employees=request.form.get("employees", ""),
+            revenue=request.form.get("revenue", ""),
+            locations=request.form.get("locations", ""),
+            website=request.form.get("website", ""),
         )
         flash("Contact saved.", "success")
         return redirect(url_for("contacts"))
-    return render_template("edit_contact.html", contact=contact, arten=arten)
+    return render_template("edit_contact.html", contact=contact, arten=arten,
+                           role_labels=enrich.ROLE_LABELS)
 
 
 @app.route("/contacts/<int:cid>/delete", methods=["POST"])
@@ -1021,16 +1032,16 @@ def _leadgen_snapshot() -> dict:
         return snap
 
 
-def _classify_candidate(cand: dict, existing: set, suppressed: set) -> str:
-    email = (cand.get("email") or "").strip()
-    e = email.lower()
-    if not email or not _valid_email(email):
+def _classify_email(email: str, existing: set, suppressed: set) -> str:
+    e = (email or "").strip()
+    el = e.lower()
+    if not e or not _valid_email(e):
         return "no-email"
-    if e in existing:
+    if el in existing:
         return "duplicate"
-    if e in suppressed:
+    if el in suppressed:
         return "suppressed"
-    if not _domain_has_mail(e.rsplit("@", 1)[-1]):
+    if not _domain_has_mail(el.rsplit("@", 1)[-1]):
         return "bad-mx"
     return "new"
 
@@ -1043,33 +1054,61 @@ def _run_leadgen_job(region: str, categories: list, limit: int):
                 _leadgen_job["error"] = f"Region '{region}' not found."
             return
         data = leadgen.fetch_overpass(leadgen.build_overpass_query(bbox, categories, limit))
-        candidates = leadgen.parse_overpass(data)[:limit]
+        businesses = leadgen.parse_overpass(data)[:limit]
+        enricher = enrich.get_enricher()
         existing = db.all_contact_emails()
         suppressed = db.suppressed_emails()
         with _leadgen_lock:
-            _leadgen_job.update(total=len(candidates), done=0)
+            _leadgen_job.update(total=len(businesses), done=0)
         results = []
-        for idx, cand in enumerate(candidates):
+        for bi, biz in enumerate(businesses):
             with _leadgen_lock:
-                _leadgen_job["current"] = cand["name"]
-                _leadgen_job["done"] = idx
-            # Enrich from the website only when OSM had no email on file.
-            if not cand["email"] and cand["website"]:
+                _leadgen_job["current"] = biz["name"]
+                _leadgen_job["done"] = bi
+            info = {}
+            if biz.get("website"):
                 try:
-                    html = leadgen.fetch_site(cand["website"])
-                    emails = leadgen.extract_emails(html)
-                    if emails:
-                        cand["email"] = emails[0]
-                    cand["pos_system"] = leadgen.detect_pos(html)
+                    site_text = leadgen.collect_site_text(biz["website"])
+                    info = enricher.enrich(biz, site_text)
                 except Exception:
-                    log.warning("Lead enrich failed: %s (%s)", cand["name"], cand["website"])
-            cand["state"] = _classify_candidate(cand, existing, suppressed)
-            if cand["state"] == "new":
-                existing.add(cand["email"].lower())  # dedupe within this run too
-            results.append(cand)
+                    log.warning("Lead enrich failed: %s (%s)", biz["name"], biz.get("website"))
+            contacts = list(info.get("contacts") or [])
+            # Fold in the email OSM already had, if the enricher didn't surface it.
+            osm_email = (biz.get("email") or "").strip()
+            if osm_email and not any((c.get("email") or "").lower() == osm_email.lower() for c in contacts):
+                contacts.append({"name": "", "role": "allgemein", "email": osm_email, "phone": biz.get("phone", "")})
+            out_contacts, seen_local = [], set()
+            for ci, c in enumerate(contacts):
+                e = (c.get("email") or "").strip()
+                el = e.lower()
+                if el in seen_local:
+                    continue
+                seen_local.add(el)
+                state = _classify_email(e, existing, suppressed)
+                if state == "new":
+                    existing.add(el)
+                out_contacts.append({
+                    "row": f"{bi}:{ci}",
+                    "name": (c.get("name") or "").strip(),
+                    "role": enrich.normalize_role(c.get("role", "")),
+                    "email": e, "phone": (c.get("phone") or "").strip(),
+                    "state": state,
+                })
+            results.append({
+                "name": biz.get("name", ""),
+                "legal_name": info.get("legal_name") or biz.get("name", ""),
+                "website": biz.get("website", ""),
+                "city": biz.get("city", ""),
+                "employees": info.get("employees", ""),
+                "revenue": info.get("revenue", ""),
+                "locations": info.get("locations", ""),
+                "pos_system": info.get("pos_system") or biz.get("pos_system", ""),
+                "contacts": out_contacts,
+            })
             with _leadgen_lock:
                 _leadgen_job["results"] = list(results)
-        log.info("Lead-gen finished: %s candidates for '%s'", len(results), region)
+        log.info("Lead-gen finished: %s businesses for '%s' (engine=%s)",
+                 len(results), region, enricher.name)
     except Exception as e:
         log.exception("Lead-gen job crashed (region=%s)", region)
         with _leadgen_lock:
@@ -1087,6 +1126,8 @@ def leads_view():
         "leads.html",
         arten=db.list_arten(),
         categories=sorted(leadgen.CATEGORY_FILTERS.keys()),
+        engine=enrich.engine_label(),
+        role_labels=enrich.ROLE_LABELS,
         job=job if job["status"] in ("running", "done") else None,
     )
 
@@ -1126,36 +1167,47 @@ def leads_status():
 @app.route("/leads/import", methods=["POST"])
 def leads_import():
     art = request.form.get("art", "").strip()
-    selected = set(request.form.getlist("email"))
+    selected = set(request.form.getlist("row"))
     if not art:
         flash("Pick a type to assign the imported leads.", "error")
         return redirect(url_for("leads_view"))
     if not selected:
         flash("No leads selected.", "error")
         return redirect(url_for("leads_view"))
-    results = _leadgen_snapshot()["results"]
-    by_email = {c["email"]: c for c in results if c.get("email")}
+    rowmap = {}
+    for biz in _leadgen_snapshot()["results"]:
+        for c in biz["contacts"]:
+            rowmap[c["row"]] = (biz, c)
     if art not in set(db.list_arten()):
         db.add_art(art)
     existing = db.all_contact_emails()
     suppressed = db.suppressed_emails()
     added = 0
-    for email in selected:
-        cand = by_email.get(email)
-        if not cand:
+    for row in selected:
+        item = rowmap.get(row)
+        if not item:
             continue
-        e = email.strip().lower()
-        if not _valid_email(email) or e in existing or e in suppressed:
+        biz, c = item
+        e = (c.get("email") or "").strip()
+        el = e.lower()
+        if not _valid_email(e) or el in existing or el in suppressed:
             continue
-        note = "Found via OpenStreetMap" + (f", {cand['city']}" if cand.get("city") else "")
+        name = (c.get("name") or "").strip()
+        parts = name.split()
+        first = parts[0] if parts else ""
+        last = " ".join(parts[1:]) if len(parts) > 1 else ""
+        note = "Found via lead search" + (f", {biz['city']}" if biz.get("city") else "")
         db.add_contact(
-            firma=cand.get("name", ""), first_name="", last_name="",
-            email=email, art=art, notes=note,
-            pos_system=cand.get("pos_system", ""), source="osm",
+            firma=biz.get("legal_name") or biz.get("name", ""),
+            first_name=first, last_name=last, email=e, art=art, notes=note,
+            role=c.get("role", ""), pos_system=biz.get("pos_system", ""),
+            employees=biz.get("employees", ""), revenue=biz.get("revenue", ""),
+            locations=biz.get("locations", ""), website=biz.get("website", ""),
+            source="osm+web",
         )
-        existing.add(e)
+        existing.add(el)
         added += 1
-    flash(f"Imported {added} lead{'' if added == 1 else 's'} as '{art}'.",
+    flash(f"Imported {added} contact{'' if added == 1 else 's'} as '{art}'.",
           "success" if added else "error")
     return redirect(url_for("leads_view"))
 

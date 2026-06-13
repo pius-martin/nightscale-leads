@@ -39,6 +39,30 @@
             <input type="text" name="pos_system" value="{{ contact.pos_system }}" placeholder="e.g. Lightspeed, Vectron, Gastrofix">
             <span class="hint">Optional — point-of-sale system, used for segmenting.</span>
         </label>
+        <div class="row" style="gap:14px">
+            <label style="flex:1; min-width:160px">Role
+                <select name="role">
+                    <option value="">—</option>
+                    {% for key, label in role_labels.items() %}
+                    <option value="{{ key }}" {% if contact.role == key %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+            </label>
+            <label style="flex:1; min-width:160px">Website
+                <input type="text" name="website" value="{{ contact.website }}" placeholder="https://…">
+            </label>
+        </div>
+        <div class="row" style="gap:14px">
+            <label style="flex:1; min-width:120px">Employees
+                <input type="text" name="employees" value="{{ contact.employees }}" placeholder="e.g. 11-50">
+            </label>
+            <label style="flex:1; min-width:120px">Revenue
+                <input type="text" name="revenue" value="{{ contact.revenue }}" placeholder="e.g. €1-5M">
+            </label>
+            <label style="flex:1; min-width:100px">Locations
+                <input type="text" name="locations" value="{{ contact.locations }}" placeholder="e.g. 3">
+            </label>
+        </div>
         <label>Notes
             <textarea name="notes" rows="3">{{ contact.notes }}</textarea>
         </label>

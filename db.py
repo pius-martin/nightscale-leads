@@ -24,6 +24,11 @@ CREATE TABLE IF NOT EXISTS contacts (
     email TEXT NOT NULL,
     art TEXT NOT NULL,
     pos_system TEXT NOT NULL DEFAULT '',
+    role TEXT NOT NULL DEFAULT '',
+    employees TEXT NOT NULL DEFAULT '',
+    revenue TEXT NOT NULL DEFAULT '',
+    locations TEXT NOT NULL DEFAULT '',
+    website TEXT NOT NULL DEFAULT '',
     status TEXT NOT NULL DEFAULT 'new',
     source TEXT NOT NULL DEFAULT '',
     notes TEXT DEFAULT '',
@@ -84,6 +89,11 @@ ALTER TABLE contacts ADD COLUMN IF NOT EXISTS last_name TEXT NOT NULL DEFAULT ''
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS pos_system TEXT NOT NULL DEFAULT '';
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS status TEXT NOT NULL DEFAULT 'new';
 ALTER TABLE contacts ADD COLUMN IF NOT EXISTS source TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS role TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS employees TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS revenue TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS locations TEXT NOT NULL DEFAULT '';
+ALTER TABLE contacts ADD COLUMN IF NOT EXISTS website TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS footer TEXT NOT NULL DEFAULT '';
 ALTER TABLE templates ADD COLUMN IF NOT EXISTS variant TEXT NOT NULL DEFAULT 'personal';
 
@@ -206,12 +216,25 @@ def list_contacts(art: str | None = None):
         return [_attach_full_name(dict(r)) for r in cur.fetchall()]
 
 
-def add_contact(firma, first_name, last_name, email, art, notes="", pos_system="", source=""):
+def add_contact(firma, first_name, last_name, email, art, notes="", pos_system="",
+                source="", role="", employees="", revenue="", locations="", website=""):
     with get_conn() as c, c.cursor() as cur:
         cur.execute(
-            "INSERT INTO contacts (firma, first_name, last_name, email, art, pos_system, source, notes) VALUES (%s, %s, %s, %s, %s, %s, %s, %s)",
-            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), pos_system.strip(), source.strip(), notes.strip()),
+            """INSERT INTO contacts
+               (firma, first_name, last_name, email, art, pos_system, role,
+                employees, revenue, locations, website, source, notes)
+               VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s, %s)""",
+            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(),
+             art.strip(), pos_system.strip(), role.strip(), employees.strip(),
+             revenue.strip(), str(locations).strip(), website.strip(),
+             source.strip(), notes.strip()),
         )
+
+
+def list_contact_roles() -> list:
+    with get_conn() as c, c.cursor() as cur:
+        cur.execute("SELECT DISTINCT role FROM contacts WHERE role <> '' ORDER BY role")
+        return [r[0] for r in cur.fetchall()]
 
 
 def all_contact_emails() -> set:
@@ -261,11 +284,16 @@ def list_suppression() -> list:
         return [dict(r) for r in cur.fetchall()]
 
 
-def update_contact(cid, firma, first_name, last_name, email, art, notes="", pos_system=""):
+def update_contact(cid, firma, first_name, last_name, email, art, notes="", pos_system="",
+                   role="", employees="", revenue="", locations="", website=""):
     with get_conn() as c, c.cursor() as cur:
         cur.execute(
-            "UPDATE contacts SET firma=%s, first_name=%s, last_name=%s, email=%s, art=%s, pos_system=%s, notes=%s WHERE id=%s",
-            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(), art.strip(), pos_system.strip(), notes.strip(), cid),
+            """UPDATE contacts SET firma=%s, first_name=%s, last_name=%s, email=%s,
+               art=%s, pos_system=%s, role=%s, employees=%s, revenue=%s,
+               locations=%s, website=%s, notes=%s WHERE id=%s""",
+            (firma.strip(), first_name.strip(), last_name.strip(), email.strip(),
+             art.strip(), pos_system.strip(), role.strip(), employees.strip(),
+             revenue.strip(), str(locations).strip(), website.strip(), notes.strip(), cid),
         )
 
 

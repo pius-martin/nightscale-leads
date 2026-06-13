@@ -181,6 +181,12 @@
                 <option value="__none__">— no POS —</option>
             </select>
             {% endif %}
+            {% if roles %}
+            <select id="contact-role-filter" class="select-inline" aria-label="Filter by role">
+                <option value="">All roles</option>
+                {% for r in roles %}<option value="{{ r }}">{{ role_labels.get(r, r) }}</option>{% endfor %}
+            </select>
+            {% endif %}
         </div>
         {% endif %}
     </div>
@@ -194,18 +200,20 @@
                 <th>Last name</th>
                 <th>Email</th>
                 <th>Type</th>
+                <th>Role</th>
                 <th>POS</th>
                 <th></th>
             </tr>
         </thead>
         <tbody>
             {% for c in contacts %}
-            <tr data-firma="{{ c.firma|lower }}" data-firstname="{{ c.first_name|lower }}" data-lastname="{{ c.last_name|lower }}" data-email="{{ c.email|lower }}" data-art="{{ c.art }}" data-pos="{{ c.pos_system or '' }}" data-possearch="{{ c.pos_system|lower }}">
+            <tr data-firma="{{ c.firma|lower }}" data-firstname="{{ c.first_name|lower }}" data-lastname="{{ c.last_name|lower }}" data-email="{{ c.email|lower }}" data-art="{{ c.art }}" data-pos="{{ c.pos_system or '' }}" data-possearch="{{ c.pos_system|lower }}" data-role="{{ c.role or '' }}">
                 <td>{{ c.firma }}</td>
                 <td>{{ c.first_name }}</td>
                 <td>{{ c.last_name }}</td>
                 <td class="mono">{{ c.email }}</td>
                 <td><span class="tag">{{ c.art }}</span></td>
+                <td>{% if c.role %}<span class="badge dim">{{ role_labels.get(c.role, c.role) }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
                 <td>{% if c.pos_system %}<span class="tag">{{ c.pos_system }}</span>{% else %}<span class="muted">—</span>{% endif %}</td>
                 <td class="actions">
                     <a class="btn btn-ghost btn-sm" href="{{ url_for('edit_contact', cid=c.id) }}">Edit</a>
@@ -231,6 +239,7 @@
     const search = document.getElementById('contact-search');
     const filter = document.getElementById('contact-filter');
     const posFilter = document.getElementById('contact-pos-filter');
+    const roleFilter = document.getElementById('contact-role-filter');
     const table = document.getElementById('contacts-table');
     const emptyMsg = document.getElementById('contacts-empty-result');
     if (!table || !search || !filter) return;
@@ -240,6 +249,7 @@
         const q = search.value.trim().toLowerCase();
         const t = filter.value;
         const p = posFilter ? posFilter.value : '';
+        const role = roleFilter ? roleFilter.value : '';
         let visible = 0;
         rows.forEach(r => {
             const matchesQ = !q || ['firma','firstname','lastname','email','possearch'].some(k => (r.dataset[k] || '').includes(q));
@@ -247,7 +257,8 @@
             let matchesP = true;
             if (p === '__none__') matchesP = !(r.dataset.pos || '').trim();
             else if (p) matchesP = r.dataset.pos === p;
-            const show = matchesQ && matchesT && matchesP;
+            const matchesRole = !role || r.dataset.role === role;
+            const show = matchesQ && matchesT && matchesP && matchesRole;
             r.style.display = show ? '' : 'none';
             if (show) visible++;
         });
@@ -256,6 +267,7 @@
     search.addEventListener('input', apply);
     filter.addEventListener('change', apply);
     if (posFilter) posFilter.addEventListener('change', apply);
+    if (roleFilter) roleFilter.addEventListener('change', apply);
 })();
 </script>
 {% endblock %}

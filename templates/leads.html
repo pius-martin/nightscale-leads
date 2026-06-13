@@ -5,7 +5,8 @@
 <div class="page-header">
     <div>
         <h1>Find leads</h1>
-        <div class="subtitle">Discover local businesses via OpenStreetMap, auto-detect their email and POS system, then import the good ones as contacts. Free, no API key.</div>
+        <div class="subtitle">Discover local businesses via OpenStreetMap, then enrich each one — decision-maker names, emails, roles, POS system and firmographics — and import the good ones as contacts.</div>
+        <div class="hint-line" style="margin-top:6px">Enrichment engine: <strong>{{ engine }}</strong></div>
     </div>
 </div>
 
@@ -72,10 +73,12 @@
     {% elif not job.results %}
     <div class="empty"><p>No businesses found for that region/category.</p></div>
     {% else %}
-    {% set new_results = job.results | selectattr('state','equalto','new') | list %}
+    {% set rows = [] %}
+    {% for b in job.results %}{% for c in b.contacts %}{% set _ = rows.append((b, c)) %}{% endfor %}{% endfor %}
+    {% set new_rows = rows | selectattr('1.state','equalto','new') | list %}
     <p class="muted" style="margin:0 0 14px">
-        Found <strong>{{ job.results|length }}</strong> businesses ·
-        <strong>{{ new_results|length }}</strong> importable (new, valid email).
+        Found <strong>{{ job.results|length }}</strong> businesses · <strong>{{ rows|length }}</strong> contacts ·
+        <strong>{{ new_rows|length }}</strong> importable (new, valid email).
         The rest are duplicates, suppressed, or have no usable email.
     </p>
     <form action="{{ url_for('leads_import') }}" method="post">
@@ -87,24 +90,32 @@
                     {% for a in arten %}<option value="{{ a }}">{{ a }}</option>{% endfor %}
                 </select>
             </label>
-            <button type="submit" class="btn btn-primary" {% if not new_results %}disabled{% endif %}>Import selected</button>
+            <button type="submit" class="btn btn-primary" {% if not new_rows %}disabled{% endif %}>Import selected</button>
+        </div>
+        <div class="chip-bar" id="lead-role-filter" role="group" aria-label="Filter by role" style="margin-bottom:12px">
+            <button type="button" class="chip active" data-role="all">All</button>
+            {% for key, label in role_labels.items() %}<button type="button" class="chip" data-role="{{ key }}">{{ label }}</button>{% endfor %}
         </div>
         <div class="table-wrap">
-        <table class="table">
-            <thead><tr><th></th><th>Business</th><th>Email</th><th>POS</th><th>City</th><th>Status</th></tr></thead>
+        <table class="table" id="leads-table">
+            <thead><tr><th></th><th>Business</th><th>Contact</th><th>Role</th><th>Email</th><th>Empl.</th><th>Revenue</th><th>Loc.</th><th>POS</th><th>Status</th></tr></thead>
             <tbody>
-                {% for r in job.results %}
-                <tr>
-                    <td>{% if r.state == 'new' %}<input type="checkbox" name="email" value="{{ r.email }}" checked>{% endif %}</td>
-                    <td>{{ r.name }}{% if r.website %} · <a href="{{ r.website }}" target="_blank" rel="noopener" class="muted">site</a>{% endif %}</td>
-                    <td class="mono">{{ r.email or '—' }}</td>
-                    <td>{% if r.pos_system %}<span class="tag">{{ r.pos_system }}</span>{% else %}—{% endif %}</td>
-                    <td class="muted">{{ r.city or '—' }}</td>
+                {% for b, c in rows %}
+                <tr data-role="{{ c.role }}">
+                    <td>{% if c.state == 'new' %}<input type="checkbox" name="row" value="{{ c.row }}" checked>{% endif %}</td>
+                    <td>{{ b.name }}{% if b.website %} · <a href="{{ b.website }}" target="_blank" rel="noopener" class="muted">site</a>{% endif %}</td>
+                    <td>{{ c.name or '—' }}</td>
+                    <td><span class="badge dim">{{ role_labels.get(c.role, c.role) }}</span></td>
+                    <td class="mono">{{ c.email or '—' }}</td>
+                    <td class="muted">{{ b.employees or '—' }}</td>
+                    <td class="muted">{{ b.revenue or '—' }}</td>
+                    <td class="muted">{{ b.locations or '—' }}</td>
+                    <td>{% if b.pos_system %}<span class="tag">{{ b.pos_system }}</span>{% else %}—{% endif %}</td>
                     <td>
-                        {% if r.state == 'new' %}<span class="badge ok">new</span>
-                        {% elif r.state == 'duplicate' %}<span class="badge dim">duplicate</span>
-                        {% elif r.state == 'suppressed' %}<span class="badge err">suppressed</span>
-                        {% elif r.state == 'bad-mx' %}<span class="badge warn">no mail server</span>
+                        {% if c.state == 'new' %}<span class="badge ok">new</span>
+                        {% elif c.state == 'duplicate' %}<span class="badge dim">duplicate</span>
+                        {% elif c.state == 'suppressed' %}<span class="badge err">suppressed</span>
+                        {% elif c.state == 'bad-mx' %}<span class="badge warn">no mail server</span>
                         {% else %}<span class="badge dim">no email</span>{% endif %}
                     </td>
                 </tr>
@@ -139,6 +150,23 @@
         setTimeout(poll, 1500);
     }
     setTimeout(poll, 1500);
+})();
+
+(function() {
+    const bar = document.getElementById('lead-role-filter');
+    const table = document.getElementById('leads-table');
+    if (!bar || !table) return;
+    const rows = Array.from(table.querySelectorAll('tbody tr'));
+    bar.addEventListener('click', (e) => {
+        const chip = e.target.closest('.chip');
+        if (!chip) return;
+        bar.querySelectorAll('.chip').forEach(c => c.classList.remove('active'));
+        chip.classList.add('active');
+        const r = chip.dataset.role;
+        rows.forEach(row => {
+            row.style.display = (r === 'all' || row.dataset.role === r) ? '' : 'none';
+        });
+    });
 })();
 </script>
 {% endblock %}
