@@ -45,6 +45,46 @@
                 {% endfor %}
             </div>
         </div>
+        {% set crit = (job.criteria if job and job.criteria else {}) %}
+        <details class="lead-criteria-block"
+                 {% if crit and (crit.roles or crit.min_employees or crit.min_revenue or crit.min_locations or crit.pos or (crit.betrieb and crit.betrieb != 'all') or crit.email_only) %}open{% endif %}>
+            <summary>Additional criteria (optional)</summary>
+            <div class="lead-filters-grid" style="margin-top:12px">
+                <div class="ff">
+                    <span class="ff-label">Position / role</span>
+                    <div class="ff-checks">
+                        {% for key, label in role_labels.items() %}
+                        <label class="check-chip"><input type="checkbox" name="want_role" value="{{ key }}"
+                            {% if crit.roles and key in crit.roles %}checked{% endif %}>{{ label }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <label class="ff"><span class="ff-label">Min. employees</span>
+                    <input type="number" name="min_employees" min="0" class="input-inline" placeholder="any"
+                           value="{{ crit.min_employees if crit.min_employees is not none else '' }}"></label>
+                <label class="ff"><span class="ff-label">Min. revenue (€)</span>
+                    <input type="number" name="min_revenue" min="0" class="input-inline" placeholder="any"
+                           value="{{ crit.min_revenue if crit.min_revenue is not none else '' }}"></label>
+                <label class="ff"><span class="ff-label">Min. locations</span>
+                    <input type="number" name="min_locations" min="0" class="input-inline" placeholder="any"
+                           value="{{ crit.min_locations if crit.min_locations is not none else '' }}"></label>
+                <label class="ff"><span class="ff-label">POS system</span>
+                    <input type="text" name="want_pos" class="input-inline" placeholder="e.g. gastrofix"
+                           value="{{ crit.pos or '' }}"></label>
+                <div class="ff">
+                    <span class="ff-label">Business type</span>
+                    <div class="ff-checks">
+                        {% for val, lbl in [('all','All'), ('single','Single location'), ('chain','Chain (2+)')] %}
+                        <label class="check-chip"><input type="radio" name="betrieb" value="{{ val }}"
+                            {% if (crit.betrieb or 'all') == val %}checked{% endif %}>{{ lbl }}</label>
+                        {% endfor %}
+                    </div>
+                </div>
+                <label class="ff ff-toggle"><input type="checkbox" name="email_only"
+                    {% if crit.email_only %}checked{% endif %}> Only leads with an email</label>
+            </div>
+            <span class="hint" style="display:block; margin-top:8px">These filter the results after enrichment (firmographics are only known once each site is read). They pre-fill the result filters below — you can still adjust them there.</span>
+        </details>
         <div class="row">
             <button type="submit" class="btn btn-primary">Search leads</button>
         </div>
@@ -92,6 +132,7 @@
             </label>
             <button type="submit" class="btn btn-primary" {% if not new_rows %}disabled{% endif %}>Import selected</button>
         </div>
+        {% set crit = (job.criteria if job and job.criteria else {}) %}
         <div class="lead-filters" id="lead-filters">
             <div class="lead-filters-head">Refine results</div>
             <div class="lead-filters-grid">
@@ -99,37 +140,62 @@
                     <span class="ff-label">Role</span>
                     <div class="ff-checks">
                         {% for key, label in role_labels.items() %}
-                        <label class="check-chip"><input type="checkbox" class="f-role" value="{{ key }}">{{ label }}</label>
+                        <label class="check-chip"><input type="checkbox" class="f-role" value="{{ key }}"
+                            {% if crit.roles and key in crit.roles %}checked{% endif %}>{{ label }}</label>
                         {% endfor %}
                     </div>
                 </div>
                 <label class="ff"><span class="ff-label">Min. employees</span>
-                    <input type="number" id="f-emp" min="0" class="input-inline" placeholder="any"></label>
+                    <input type="number" id="f-emp" min="0" class="input-inline" placeholder="any"
+                           value="{{ crit.min_employees if crit.min_employees is not none else '' }}"></label>
+                <label class="ff"><span class="ff-label">Min. revenue (€)</span>
+                    <input type="number" id="f-rev" min="0" class="input-inline" placeholder="any"
+                           value="{{ crit.min_revenue if crit.min_revenue is not none else '' }}"></label>
                 <label class="ff"><span class="ff-label">Min. locations</span>
-                    <input type="number" id="f-loc" min="0" class="input-inline" placeholder="any"></label>
+                    <input type="number" id="f-loc" min="0" class="input-inline" placeholder="any"
+                           value="{{ crit.min_locations if crit.min_locations is not none else '' }}"></label>
                 <label class="ff"><span class="ff-label">POS contains</span>
-                    <input type="text" id="f-pos" class="input-inline" placeholder="e.g. gastrofix"></label>
-                <label class="ff ff-toggle"><input type="checkbox" id="f-email"> Has email</label>
+                    <input type="text" id="f-pos" class="input-inline" placeholder="e.g. gastrofix"
+                           value="{{ crit.pos or '' }}"></label>
+                <label class="ff"><span class="ff-label">Business type</span>
+                    <select id="f-betrieb" class="input-inline">
+                        <option value="all" {% if (crit.betrieb or 'all') == 'all' %}selected{% endif %}>All</option>
+                        <option value="single" {% if crit.betrieb == 'single' %}selected{% endif %}>Single location</option>
+                        <option value="chain" {% if crit.betrieb == 'chain' %}selected{% endif %}>Chain (2+)</option>
+                    </select></label>
+                <label class="ff ff-toggle"><input type="checkbox" id="f-email" {% if crit.email_only %}checked{% endif %}> Has email</label>
                 <label class="ff ff-toggle"><input type="checkbox" id="f-new"> New only</label>
             </div>
             <div class="hint-line" id="f-count"></div>
         </div>
+        <p class="hint" style="margin:0 0 8px">All fields below are editable before import — fix names, emails, roles or firmographics as needed.</p>
         <div class="table-wrap">
-        <table class="table" id="leads-table">
+        <table class="table table-edit" id="leads-table">
             <thead><tr><th></th><th>Business</th><th>Contact</th><th>Role</th><th>Email</th><th>Empl.</th><th>Revenue</th><th>Loc.</th><th>POS</th><th>Status</th></tr></thead>
             <tbody>
                 {% for b, c in rows %}
-                <tr data-role="{{ c.role }}" data-emp="{{ b.employees }}" data-loc="{{ b.locations }}"
-                    data-pos="{{ b.pos_system|lower }}" data-email="{{ '1' if c.email else '0' }}" data-state="{{ c.state }}">
+                <tr data-row="{{ c.row }}" data-role="{{ c.role }}" data-emp="{{ b.employees }}" data-rev="{{ b.revenue }}"
+                    data-loc="{{ b.locations }}" data-pos="{{ b.pos_system|lower }}"
+                    data-email="{{ '1' if c.email else '0' }}" data-state="{{ c.state }}">
                     <td>{% if c.state == 'new' %}<input type="checkbox" name="row" value="{{ c.row }}" checked>{% endif %}</td>
-                    <td>{{ b.name }}{% if b.website %} · <a href="{{ b.website }}" target="_blank" rel="noopener" class="muted">site</a>{% endif %}</td>
-                    <td>{{ c.name or '—' }}</td>
-                    <td><span class="badge dim">{{ role_labels.get(c.role, c.role) }}</span></td>
-                    <td class="mono">{{ c.email or '—' }}</td>
-                    <td class="muted">{{ b.employees or '—' }}</td>
-                    <td class="muted">{{ b.revenue or '—' }}</td>
-                    <td class="muted">{{ b.locations or '—' }}</td>
-                    <td>{% if b.pos_system %}<span class="tag">{{ b.pos_system }}</span>{% else %}—{% endif %}</td>
+                    <td>
+                        {{ b.name }}{% if b.website %} · <a href="{{ b.website }}" target="_blank" rel="noopener" class="muted">site</a>{% endif %}
+                        <input type="hidden" name="firma_{{ c.row }}" value="{{ b.legal_name or b.name }}">
+                        <input type="hidden" name="website_{{ c.row }}" value="{{ b.website }}">
+                    </td>
+                    <td><input type="text" name="name_{{ c.row }}" value="{{ c.name }}" placeholder="—" class="cell-input"></td>
+                    <td>
+                        <select name="role_{{ c.row }}" class="cell-input">
+                            {% for key, label in role_labels.items() %}
+                            <option value="{{ key }}" {% if c.role == key %}selected{% endif %}>{{ label }}</option>
+                            {% endfor %}
+                        </select>
+                    </td>
+                    <td><input type="text" name="email_{{ c.row }}" value="{{ c.email }}" placeholder="—" class="cell-input mono"></td>
+                    <td><input type="text" name="employees_{{ c.row }}" value="{{ b.employees }}" placeholder="—" class="cell-input cell-narrow"></td>
+                    <td><input type="text" name="revenue_{{ c.row }}" value="{{ b.revenue }}" placeholder="—" class="cell-input cell-narrow"></td>
+                    <td><input type="text" name="locations_{{ c.row }}" value="{{ b.locations }}" placeholder="—" class="cell-input cell-narrow"></td>
+                    <td><input type="text" name="pos_{{ c.row }}" value="{{ b.pos_system }}" placeholder="—" class="cell-input"></td>
                     <td>
                         {% if c.state == 'new' %}<span class="badge ok">new</span>
                         {% elif c.state == 'duplicate' %}<span class="badge dim">duplicate</span>
@@ -178,25 +244,39 @@
     const rows = Array.from(table.querySelectorAll('tbody tr'));
     const roleChecks = Array.from(panel.querySelectorAll('.f-role'));
     const empEl = document.getElementById('f-emp');
+    const revEl = document.getElementById('f-rev');
     const locEl = document.getElementById('f-loc');
     const posEl = document.getElementById('f-pos');
+    const betriebEl = document.getElementById('f-betrieb');
     const emailEl = document.getElementById('f-email');
     const newEl = document.getElementById('f-new');
     const countEl = document.getElementById('f-count');
     const num = (s) => { const m = (s || '').match(/\d+/); return m ? parseInt(m[0], 10) : null; };
+    // Read the row's current (possibly edited) value, falling back to data-*.
+    const cell = (r, name, fallback) => {
+        const el = r.querySelector('[name^="' + name + '_"]');
+        return el ? el.value : (fallback || '');
+    };
 
     function apply() {
         const roles = roleChecks.filter(c => c.checked).map(c => c.value);
-        const minEmp = num(empEl.value), minLoc = num(locEl.value);
+        const minEmp = num(empEl.value), minRev = num(revEl.value), minLoc = num(locEl.value);
         const pos = posEl.value.trim().toLowerCase();
+        const betrieb = betriebEl ? betriebEl.value : 'all';
         let visible = 0;
         rows.forEach(r => {
             let show = true;
-            if (roles.length && !roles.includes(r.dataset.role)) show = false;
-            if (show && minEmp !== null) { const e = num(r.dataset.emp); if (e === null || e < minEmp) show = false; }
-            if (show && minLoc !== null) { const l = num(r.dataset.loc); if (l === null || l < minLoc) show = false; }
-            if (show && pos && !(r.dataset.pos || '').includes(pos)) show = false;
-            if (show && emailEl.checked && r.dataset.email !== '1') show = false;
+            const role = cell(r, 'role', r.dataset.role);
+            const emailVal = cell(r, 'email', '').trim();
+            const locN = num(cell(r, 'locations', r.dataset.loc));
+            if (roles.length && !roles.includes(role)) show = false;
+            if (show && minEmp !== null) { const e = num(cell(r, 'employees', r.dataset.emp)); if (e === null || e < minEmp) show = false; }
+            if (show && minRev !== null) { const v = num(cell(r, 'revenue', r.dataset.rev)); if (v === null || v < minRev) show = false; }
+            if (show && minLoc !== null) { if (locN === null || locN < minLoc) show = false; }
+            if (show && pos && !cell(r, 'pos', r.dataset.pos).toLowerCase().includes(pos)) show = false;
+            if (show && betrieb === 'single' && locN !== null && locN > 1) show = false;
+            if (show && betrieb === 'chain' && (locN === null || locN < 2)) show = false;
+            if (show && emailEl.checked && !emailVal) show = false;
             if (show && newEl.checked && r.dataset.state !== 'new') show = false;
             r.style.display = show ? '' : 'none';
             if (show) visible++;

@@ -403,6 +403,17 @@ def main():
         {"tags": {"name": "X", "contact:email": "x@y.com"}}, {"tags": {}}]})
     ok(len(parsed) == 1 and parsed[0]["email"] == "x@y.com", "parse_overpass keeps named + email")
 
+    # --- name validation: only plausible person names survive
+    import enrich as _enrich
+    ok(_enrich.plausible_name("Max Huber"), "plausible_name accepts a real name")
+    ok(_enrich.plausible_name("Anna-Lena Müller"), "plausible_name accepts hyphenated name")
+    ok(not _enrich.plausible_name("Geschäftsführer Huber"), "plausible_name rejects title word")
+    ok(not _enrich.plausible_name("Impressum"), "plausible_name rejects single word")
+    ok(not _enrich.plausible_name("MAX HUBER"), "plausible_name rejects all-caps")
+    ok(not _enrich.plausible_name("Team 5"), "plausible_name rejects digits/stopword")
+    ok(_enrich.clean_name("Geschäftsführer Huber") == "", "clean_name blanks implausible names")
+    ok(_enrich.clean_name("Max Huber") == "Max Huber", "clean_name keeps plausible names")
+
     # --- ClaudeEnricher mapping (mocked SDK client, no network/key)
     import enrich as enrich_mod
 
@@ -472,6 +483,31 @@ def main():
     # re-importing the same rows must not duplicate
     c.post("/leads/import", data={"csrf_token": token, "art": "Investor", "row": new_rows})
     ok(len(S.contacts) == before + 3, "duplicate lead import is a no-op")
+
+    # --- edited import: per-row fields override the snapshot, invalid email is skipped
+    job2 = c.get("/leads/status").get_json()
+    new2 = [c2["row"] for b in job2["results"] for c2 in b["contacts"] if c2["state"] == "new"]
+    # all current emails are now duplicates, so edit one to a fresh valid address
+    edit_row = new2[0] if new2 else next(c2["row"] for b in job2["results"] for c2 in b["contacts"])
+    base = len(S.contacts)
+    c.post("/leads/import", data={
+        "csrf_token": token, "art": "Investor", "row": [edit_row],
+        f"email_{edit_row}": "fresh.lead@example-new.at",
+        f"name_{edit_row}": "Erika Mustermann",
+        f"role_{edit_row}": "marketing",
+        f"employees_{edit_row}": "99",
+    })
+    ok(len(S.contacts) == base + 1, "edited row imported with new email")
+    edited = next(x for x in S.contacts.values() if x["email"] == "fresh.lead@example-new.at")
+    ok(edited["first_name"] == "Erika" and edited["role"] == "marketing" and edited["employees"] == "99",
+       "edited name/role/firmographics persisted")
+    # an invalid edited email must be rejected
+    bad = len(S.contacts)
+    c.post("/leads/import", data={
+        "csrf_token": token, "art": "Investor", "row": [edit_row],
+        f"email_{edit_row}": "not-an-email",
+    })
+    ok(len(S.contacts) == bad, "edited row with invalid email skipped")
 
     # --- contact delete
     cid = next(iter(S.contacts))

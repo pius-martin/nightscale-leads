@@ -50,6 +50,50 @@ _UID_RE = re.compile(r"\bATU\d{8}\b")
 _EMP_RE = re.compile(r"(\d{1,5})\s*(?:Mitarbeiter|Besch[äa]ftigte|Mitarbeitende|employees)", re.I)
 _GENERIC_LOCALS = {"info", "office", "kontakt", "contact", "mail", "hello", "welcome", "anfrage"}
 
+# A single name token: starts uppercase, then letters (incl. umlauts) and the
+# joiners that occur in real names. No digits, no all-caps acronyms.
+_NAME_TOKEN_RE = re.compile(r"^[A-ZÄÖÜ][a-zäöüß]+(?:[-'][A-ZÄÖÜ]?[a-zäöüß]+)*$")
+# Words that look like a name but aren't — titles, roles, page furniture,
+# legal-form and address noise the regex extractor tends to grab by accident.
+_NAME_STOPWORDS = {
+    "geschäftsführer", "geschaeftsfuehrer", "geschäftsführerin", "geschaeftsfuehrerin",
+    "inhaber", "inhaberin", "eigentümer", "eigentuemer", "owner", "ceo", "gründer",
+    "gruender", "gründerin", "prokurist", "prokuristin", "leitung", "leiter", "leiterin",
+    "marketing", "vertrieb", "sales", "verkauf", "kommunikation", "presse",
+    "herr", "frau", "team", "kontakt", "contact", "impressum", "datenschutz",
+    "öffnungszeiten", "oeffnungszeiten", "anfahrt", "standort", "standorte", "filiale",
+    "filialen", "wir", "unser", "unsere", "über", "ueber", "uns", "home", "startseite",
+    "willkommen", "welcome", "newsletter", "cookie", "cookies", "menü", "menue", "speisekarte",
+    "gmbh", "kg", "og", "ag", "gesmbh", "co", "ug", "ev", "verein", "stadt", "straße",
+    "strasse", "platz", "montag", "dienstag", "mittwoch", "donnerstag", "freitag",
+    "samstag", "sonntag", "januar", "februar", "märz", "maerz", "april", "mai", "juni",
+    "juli", "august", "september", "oktober", "november", "dezember",
+}
+
+
+def plausible_name(value: str) -> bool:
+    """True only for something that looks like a real person's name: 2-4 tokens,
+    each a capitalised word, none of them a title/role/page-furniture word."""
+    name = (value or "").strip()
+    if not name or any(ch.isdigit() for ch in name):
+        return False
+    tokens = name.split()
+    if not (2 <= len(tokens) <= 4):
+        return False
+    for tok in tokens:
+        if not _NAME_TOKEN_RE.match(tok):
+            return False
+        if tok.lower().strip(".'-") in _NAME_STOPWORDS:
+            return False
+    return True
+
+
+def clean_name(value: str) -> str:
+    """Return the name if it is plausible, otherwise an empty string — so a
+    bogus extraction never gets imported as a contact's name."""
+    name = (value or "").strip()
+    return name if plausible_name(name) else ""
+
 
 def normalize_role(value: str) -> str:
     v = (value or "").strip().lower()
@@ -108,7 +152,7 @@ class FreeRegexEnricher:
             local = email.split("@")[0].lower()
             role = _role_for(window)
             names = _NAME_RE.findall(_TITLE_RE.sub(" ", window))
-            name = " ".join(names[-1]) if names else ""
+            name = clean_name(" ".join(names[-1]) if names else "")
             result["contacts"].append({"name": name, "role": role, "email": email, "phone": ""})
         return result
 
@@ -195,7 +239,7 @@ class ClaudeEnricher:
             if not email:
                 continue
             contacts.append({
-                "name": (cg("name") or "").strip(),
+                "name": clean_name(cg("name") or ""),
                 "role": normalize_role(cg("role") or ""),
                 "email": email,
                 "phone": (cg("phone") or "").strip(),

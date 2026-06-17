@@ -1019,7 +1019,7 @@ def send_status():
 _leadgen_lock = threading.Lock()
 _leadgen_job = {
     "status": "idle",  # idle | running | done
-    "region": "", "categories": [],
+    "region": "", "categories": [], "criteria": {},
     "total": 0, "done": 0, "current": "", "error": "",
     "results": [], "reported": True,
 }
@@ -1044,6 +1044,31 @@ def _classify_email(email: str, existing: set, suppressed: set) -> str:
     if not _domain_has_mail(el.rsplit("@", 1)[-1]):
         return "bad-mx"
     return "new"
+
+
+def _parse_lead_criteria(form) -> dict:
+    """Read the optional search-form criteria. They don't change the OSM query
+    (employees/revenue/locations/pos are only known after enrichment); they
+    pre-fill the result Refine filters so the user sees matching leads first."""
+    def _int(name):
+        try:
+            return int(form.get(name, "").strip())
+        except (ValueError, AttributeError):
+            return None
+
+    roles = [r for r in form.getlist("want_role") if r in enrich.ROLES]
+    betrieb = form.get("betrieb", "all").strip()
+    if betrieb not in ("all", "single", "chain"):
+        betrieb = "all"
+    return {
+        "roles": roles,
+        "min_employees": _int("min_employees"),
+        "min_revenue": _int("min_revenue"),
+        "min_locations": _int("min_locations"),
+        "pos": (form.get("want_pos", "") or "").strip(),
+        "betrieb": betrieb,
+        "email_only": bool(form.get("email_only")),
+    }
 
 
 def _run_leadgen_job(region: str, categories: list, limit: int):
@@ -1089,7 +1114,7 @@ def _run_leadgen_job(region: str, categories: list, limit: int):
                     existing.add(el)
                 out_contacts.append({
                     "row": f"{bi}:{ci}",
-                    "name": (c.get("name") or "").strip(),
+                    "name": enrich.clean_name(c.get("name") or ""),
                     "role": enrich.normalize_role(c.get("role", "")),
                     "email": e, "phone": (c.get("phone") or "").strip(),
                     "state": state,
@@ -1136,6 +1161,7 @@ def leads_view():
 def leads_run():
     region = request.form.get("region", "").strip()
     categories = [c for c in request.form.getlist("categories") if c in leadgen.CATEGORY_FILTERS]
+    criteria = _parse_lead_criteria(request.form)
     try:
         limit = max(1, min(int(request.form.get("limit", "25")), 60))
     except ValueError:
@@ -1151,7 +1177,7 @@ def leads_run():
             flash("A lead search is already running — let it finish first.", "error")
             return redirect(url_for("leads_view"))
         _leadgen_job.update(
-            status="running", region=region, categories=categories,
+            status="running", region=region, categories=categories, criteria=criteria,
             total=0, done=0, current="", error="", results=[], reported=False,
         )
     log.info("Lead-gen started: region=%s categories=%s limit=%s", region, categories, limit)
@@ -1182,33 +1208,48 @@ def leads_import():
         db.add_art(art)
     existing = db.all_contact_emails()
     suppressed = db.suppressed_emails()
-    added = 0
+
+    def edited(field, row, fallback):
+        """Prefer the value the user edited in the results table; fall back to
+        the enriched snapshot value if that field wasn't submitted."""
+        val = request.form.get(f"{field}_{row}")
+        return val.strip() if val is not None else (fallback or "").strip()
+
+    added = invalid = 0
     for row in selected:
         item = rowmap.get(row)
         if not item:
             continue
         biz, c = item
-        e = (c.get("email") or "").strip()
+        e = edited("email", row, c.get("email"))
         el = e.lower()
         if not _valid_email(e) or el in existing or el in suppressed:
+            invalid += 1
             continue
-        name = (c.get("name") or "").strip()
+        # Name: take the edited value, but only keep it if it's a plausible
+        # person name — otherwise import the contact without a bogus name.
+        name = enrich.clean_name(edited("name", row, c.get("name")))
         parts = name.split()
         first = parts[0] if parts else ""
         last = " ".join(parts[1:]) if len(parts) > 1 else ""
         note = "Found via lead search" + (f", {biz['city']}" if biz.get("city") else "")
         db.add_contact(
-            firma=biz.get("legal_name") or biz.get("name", ""),
+            firma=edited("firma", row, biz.get("legal_name") or biz.get("name", "")),
             first_name=first, last_name=last, email=e, art=art, notes=note,
-            role=c.get("role", ""), pos_system=biz.get("pos_system", ""),
-            employees=biz.get("employees", ""), revenue=biz.get("revenue", ""),
-            locations=biz.get("locations", ""), website=biz.get("website", ""),
+            role=enrich.normalize_role(edited("role", row, c.get("role"))),
+            pos_system=edited("pos", row, biz.get("pos_system")),
+            employees=edited("employees", row, biz.get("employees")),
+            revenue=edited("revenue", row, biz.get("revenue")),
+            locations=edited("locations", row, biz.get("locations")),
+            website=edited("website", row, biz.get("website")),
             source="osm+web",
         )
         existing.add(el)
         added += 1
-    flash(f"Imported {added} contact{'' if added == 1 else 's'} as '{art}'.",
-          "success" if added else "error")
+    msg = f"Imported {added} contact{'' if added == 1 else 's'} as '{art}'."
+    if invalid:
+        msg += f" Skipped {invalid} (invalid, duplicate or suppressed email)."
+    flash(msg, "success" if added else "error")
     return redirect(url_for("leads_view"))
 
 
