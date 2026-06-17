@@ -1016,13 +1016,59 @@ def send_status():
 
 
 # ---------- Lead generation ----------
+# Hard cap on candidates enriched per search, so strict criteria that rarely
+# match can't make a single search hammer hundreds of websites.
+LEAD_SCAN_CAP = 150
+
 _leadgen_lock = threading.Lock()
 _leadgen_job = {
     "status": "idle",  # idle | running | done
     "region": "", "categories": [], "criteria": {},
-    "total": 0, "done": 0, "current": "", "error": "",
+    "total": 0, "done": 0, "scanned": 0, "matched": 0, "current": "", "error": "",
     "results": [], "reported": True,
 }
+
+
+def _lead_num(value):
+    """First integer found in a firmographic string, or None if unknown."""
+    m = re.search(r"\d+", str(value or ""))
+    return int(m.group(0)) if m else None
+
+
+def _business_matches(biz: dict, criteria: dict):
+    """Apply the search criteria to an enriched business. Returns
+    (matches, filtered_contacts). A criterion only excludes when the value is
+    KNOWN and fails — unknown firmographics never exclude (free enrichment
+    rarely determines them). Role / email_only filter the contacts."""
+    crit = criteria or {}
+    emp = _lead_num(biz.get("employees"))
+    rev = _lead_num(biz.get("revenue"))
+    loc = _lead_num(biz.get("locations"))
+    pos = (biz.get("pos_system") or "").lower()
+
+    if crit.get("min_employees") is not None and emp is not None and emp < crit["min_employees"]:
+        return False, []
+    if crit.get("min_revenue") is not None and rev is not None and rev < crit["min_revenue"]:
+        return False, []
+    if crit.get("min_locations") is not None and loc is not None and loc < crit["min_locations"]:
+        return False, []
+    if crit.get("betrieb") == "single" and loc is not None and loc > 1:
+        return False, []
+    if crit.get("betrieb") == "chain" and loc is not None and loc < 2:
+        return False, []
+    want_pos = (crit.get("pos") or "").strip().lower()
+    if want_pos and pos and want_pos not in pos:
+        return False, []
+
+    contacts = list(biz.get("contacts") or [])
+    roles = crit.get("roles") or []
+    if roles:
+        contacts = [c for c in contacts if c.get("role") in roles]
+    if crit.get("email_only"):
+        contacts = [c for c in contacts if (c.get("email") or "").strip()]
+    if (roles or crit.get("email_only")) and not contacts:
+        return False, []
+    return True, contacts
 
 
 def _leadgen_snapshot() -> dict:
@@ -1071,25 +1117,32 @@ def _parse_lead_criteria(form) -> dict:
     }
 
 
-def _run_leadgen_job(region: str, categories: list, limit: int):
+def _run_leadgen_job(region: str, categories: list, target: int, criteria: dict | None = None):
+    criteria = criteria or {}
     try:
         bbox = leadgen.geocode_region(region)
         if not bbox:
             with _leadgen_lock:
                 _leadgen_job["error"] = f"Region '{region}' not found."
             return
-        data = leadgen.fetch_overpass(leadgen.build_overpass_query(bbox, categories, limit))
-        businesses = leadgen.parse_overpass(data)[:limit]
+        # Scan a larger candidate pool than the target, so we can keep going past
+        # non-matching businesses until we have `target` that fit the criteria.
+        scan_cap = min(max(target * 6, 60), LEAD_SCAN_CAP)
+        data = leadgen.fetch_overpass(leadgen.build_overpass_query(bbox, categories, scan_cap))
+        businesses = leadgen.parse_overpass(data)[:scan_cap]
         enricher = enrich.get_enricher()
         existing = db.all_contact_emails()
         suppressed = db.suppressed_emails()
         with _leadgen_lock:
-            _leadgen_job.update(total=len(businesses), done=0)
+            _leadgen_job.update(total=len(businesses), done=0, scanned=0, matched=0)
         results = []
         for bi, biz in enumerate(businesses):
+            if len(results) >= target:
+                break
             with _leadgen_lock:
                 _leadgen_job["current"] = biz["name"]
                 _leadgen_job["done"] = bi
+                _leadgen_job["scanned"] = bi
             info = {}
             if biz.get("website"):
                 try:
@@ -1119,7 +1172,7 @@ def _run_leadgen_job(region: str, categories: list, limit: int):
                     "email": e, "phone": (c.get("phone") or "").strip(),
                     "state": state,
                 })
-            results.append({
+            entry = {
                 "name": biz.get("name", ""),
                 "legal_name": info.get("legal_name") or biz.get("name", ""),
                 "website": biz.get("website", ""),
@@ -1129,11 +1182,20 @@ def _run_leadgen_job(region: str, categories: list, limit: int):
                 "locations": info.get("locations", ""),
                 "pos_system": info.get("pos_system") or biz.get("pos_system", ""),
                 "contacts": out_contacts,
-            })
+            }
+            matches, kept = _business_matches(entry, criteria)
+            if not matches:
+                with _leadgen_lock:
+                    _leadgen_job["scanned"] = bi + 1
+                continue
+            entry["contacts"] = kept
+            results.append(entry)
             with _leadgen_lock:
                 _leadgen_job["results"] = list(results)
-        log.info("Lead-gen finished: %s businesses for '%s' (engine=%s)",
-                 len(results), region, enricher.name)
+                _leadgen_job["matched"] = len(results)
+                _leadgen_job["scanned"] = bi + 1
+        log.info("Lead-gen finished: %s/%s scanned matched for '%s' (target=%s, engine=%s)",
+                 len(results), len(businesses), region, target, enricher.name)
     except Exception as e:
         log.exception("Lead-gen job crashed (region=%s)", region)
         with _leadgen_lock:
@@ -1178,10 +1240,11 @@ def leads_run():
             return redirect(url_for("leads_view"))
         _leadgen_job.update(
             status="running", region=region, categories=categories, criteria=criteria,
-            total=0, done=0, current="", error="", results=[], reported=False,
+            total=0, done=0, scanned=0, matched=0, current="", error="", results=[], reported=False,
         )
-    log.info("Lead-gen started: region=%s categories=%s limit=%s", region, categories, limit)
-    threading.Thread(target=_run_leadgen_job, args=(region, categories, limit), daemon=True).start()
+    log.info("Lead-gen started: region=%s categories=%s target=%s criteria=%s",
+             region, categories, limit, criteria)
+    threading.Thread(target=_run_leadgen_job, args=(region, categories, limit, criteria), daemon=True).start()
     return redirect(url_for("leads_view"))
 
 

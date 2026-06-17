@@ -436,6 +436,30 @@ def main():
     ok(fc["news@elaya-hotels.com"]["name"] == "", "shared mailbox gets no name")
     ok(fc["max.huber@webbistro.at"]["name"] == "Max Huber", "anchored/personal mailbox keeps name")
 
+    # --- criteria matching during search (server-side filter)
+    bm = app_module._business_matches
+    biz_gf = {"employees": "", "revenue": "", "locations": "", "pos_system": "",
+              "contacts": [{"role": "geschaeftsfuehrung", "email": "a@x.at"},
+                           {"role": "allgemein", "email": "info@x.at"}]}
+    m, kept = bm(biz_gf, {"roles": ["geschaeftsfuehrung"]})
+    ok(m and len(kept) == 1 and kept[0]["role"] == "geschaeftsfuehrung",
+       "role criterion keeps only matching contacts")
+    m, kept = bm({"contacts": [{"role": "allgemein", "email": "info@x.at"}]},
+                 {"roles": ["geschaeftsfuehrung"]})
+    ok(not m, "business without a wanted-role contact is excluded")
+    # unknown firmographics never exclude
+    m, _ = bm(biz_gf, {"min_employees": 50})
+    ok(m, "unknown employees does not exclude")
+    m, _ = bm({"employees": "12", "contacts": [{"role": "allgemein", "email": "i@x.at"}]},
+              {"min_employees": 50})
+    ok(not m, "known employees below minimum excludes")
+    m, _ = bm({"locations": "1", "contacts": [{"email": "i@x.at"}]}, {"betrieb": "chain"})
+    ok(not m, "single location excluded when chain requested")
+    m, _ = bm({"locations": "", "contacts": [{"email": "i@x.at"}]}, {"betrieb": "chain"})
+    ok(m, "unknown locations not excluded by chain filter")
+    m, kept = bm({"contacts": [{"email": "a@x.at"}, {"email": ""}]}, {"email_only": True})
+    ok(m and len(kept) == 1, "email_only drops contacts without an email")
+
     # --- ClaudeEnricher mapping (mocked SDK client, no network/key)
     import enrich as enrich_mod
 
@@ -530,6 +554,21 @@ def main():
         f"email_{edit_row}": "not-an-email",
     })
     ok(len(S.contacts) == bad, "edited row with invalid email skipped")
+
+    # --- criteria search end-to-end: only matching businesses come back
+    app_module._leadgen_job["status"] = "idle"
+    c.post("/leads/run", data={
+        "csrf_token": token, "region": "Bregenz", "categories": ["restaurant", "cafe"],
+        "limit": "10", "want_role": "geschaeftsfuehrung",
+    }, follow_redirects=True)
+    wait_job_done(c, "/leads/status")
+    cjob = c.get("/leads/status").get_json()
+    ok(cjob["results"], "criteria search returns matches")
+    ok(all(all(ct["role"] == "geschaeftsfuehrung" for ct in b["contacts"]) for b in cjob["results"]),
+       "criteria search returns only geschaeftsfuehrung contacts")
+    ok(all(b["contacts"] for b in cjob["results"]), "no empty businesses in criteria results")
+    ok(cjob["matched"] == len(cjob["results"]) and cjob["scanned"] >= cjob["matched"],
+       "job tracks matched + scanned counts")
 
     # --- contact delete
     cid = next(iter(S.contacts))

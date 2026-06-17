@@ -96,14 +96,14 @@
 <div class="card mt">
     <div class="card-header">
         <h2>Results{% if job.region %} · {{ job.region }}{% endif %}</h2>
-        {% if job.status == 'running' %}<span class="badge dim" id="lead-progress-badge">{{ job.done }} / {{ job.total or '?' }}</span>{% endif %}
+        {% if job.status == 'running' %}<span class="badge dim" id="lead-progress-badge">{{ job.matched }} matching</span>{% endif %}
     </div>
 
     {% if job.status == 'running' %}
     <div class="send-progress" id="lead-progress" data-status-url="{{ url_for('leads_status') }}">
         <div class="send-progress-head">
             <strong>Searching &amp; enriching…</strong>
-            <span class="mono muted" id="lead-count">{{ job.done }} / {{ job.total or '?' }}</span>
+            <span class="mono muted" id="lead-count">{{ job.matched }} matching · scanned {{ job.scanned }} / {{ job.total or '?' }}</span>
         </div>
         <div class="progress-track"><div class="progress-bar" id="lead-bar"></div></div>
         <div class="muted" id="lead-current">{{ job.current }}</div>
@@ -111,15 +111,15 @@
     {% elif job.error %}
     <div class="banner warn"><span>Lead search failed: {{ job.error }}</span></div>
     {% elif not job.results %}
-    <div class="empty"><p>No businesses found for that region/category.</p></div>
+    <div class="empty"><p>No businesses matched your criteria in that region. Try fewer criteria or a wider area.</p></div>
     {% else %}
     {% set rows = [] %}
     {% for b in job.results %}{% for c in b.contacts %}{% set _ = rows.append((b, c)) %}{% endfor %}{% endfor %}
     {% set new_rows = rows | selectattr('1.state','equalto','new') | list %}
     <p class="muted" style="margin:0 0 14px">
-        Found <strong>{{ job.results|length }}</strong> businesses · <strong>{{ rows|length }}</strong> contacts ·
-        <strong>{{ new_rows|length }}</strong> importable (new, valid email).
-        The rest are duplicates, suppressed, or have no usable email.
+        Scanned <strong>{{ job.scanned }}</strong> businesses · <strong>{{ job.results|length }}</strong> match your criteria ·
+        <strong>{{ rows|length }}</strong> contacts · <strong>{{ new_rows|length }}</strong> importable (new, valid email).
+        Businesses where a value couldn't be determined are kept, not excluded.
     </p>
     <form action="{{ url_for('leads_import') }}" method="post">
         <input type="hidden" name="csrf_token" value="{{ csrf_token }}">
@@ -132,9 +132,11 @@
             </label>
             <button type="submit" class="btn btn-primary" {% if not new_rows %}disabled{% endif %}>Import selected</button>
         </div>
-        {% set crit = (job.criteria if job and job.criteria else {}) %}
+        {# Criteria are already applied server-side; this panel only narrows the
+           matches further, so it starts empty. #}
+        {% set crit = {} %}
         <div class="lead-filters" id="lead-filters">
-            <div class="lead-filters-head">Refine results</div>
+            <div class="lead-filters-head">Refine matches further</div>
             <div class="lead-filters-grid">
                 <div class="ff">
                     <span class="ff-label">Role</span>
@@ -229,8 +231,8 @@
             job = await fetch(panel.dataset.statusUrl).then(r => r.json());
         } catch (e) { setTimeout(poll, 3000); return; }
         if (job.status !== 'running') { location.reload(); return; }
-        count.textContent = job.done + ' / ' + (job.total || '?');
-        bar.style.width = job.total ? Math.round(100 * job.done / job.total) + '%' : '0%';
+        count.textContent = (job.matched || 0) + ' matching · scanned ' + (job.scanned || 0) + ' / ' + (job.total || '?');
+        bar.style.width = job.total ? Math.round(100 * (job.scanned || 0) / job.total) + '%' : '0%';
         current.textContent = job.current || '';
         setTimeout(poll, 1500);
     }
@@ -269,13 +271,16 @@
             const role = cell(r, 'role', r.dataset.role);
             const emailVal = cell(r, 'email', '').trim();
             const locN = num(cell(r, 'locations', r.dataset.loc));
+            // Firmographic filters only exclude when the value is KNOWN and fails.
+            // Unknown values (enrichment couldn't determine them) never hide a lead,
+            // otherwise a criterion like "chain" would wipe the whole table.
             if (roles.length && !roles.includes(role)) show = false;
-            if (show && minEmp !== null) { const e = num(cell(r, 'employees', r.dataset.emp)); if (e === null || e < minEmp) show = false; }
-            if (show && minRev !== null) { const v = num(cell(r, 'revenue', r.dataset.rev)); if (v === null || v < minRev) show = false; }
-            if (show && minLoc !== null) { if (locN === null || locN < minLoc) show = false; }
+            if (show && minEmp !== null) { const e = num(cell(r, 'employees', r.dataset.emp)); if (e !== null && e < minEmp) show = false; }
+            if (show && minRev !== null) { const v = num(cell(r, 'revenue', r.dataset.rev)); if (v !== null && v < minRev) show = false; }
+            if (show && minLoc !== null) { if (locN !== null && locN < minLoc) show = false; }
             if (show && pos && !cell(r, 'pos', r.dataset.pos).toLowerCase().includes(pos)) show = false;
             if (show && betrieb === 'single' && locN !== null && locN > 1) show = false;
-            if (show && betrieb === 'chain' && (locN === null || locN < 2)) show = false;
+            if (show && betrieb === 'chain' && locN !== null && locN < 2) show = false;
             if (show && emailEl.checked && !emailVal) show = false;
             if (show && newEl.checked && r.dataset.state !== 'new') show = false;
             r.style.display = show ? '' : 'none';
