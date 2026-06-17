@@ -413,6 +413,28 @@ def main():
     ok(not _enrich.plausible_name("Team 5"), "plausible_name rejects digits/stopword")
     ok(_enrich.clean_name("Geschäftsführer Huber") == "", "clean_name blanks implausible names")
     ok(_enrich.clean_name("Max Huber") == "Max Huber", "clean_name keeps plausible names")
+    ok(not _enrich.plausible_name("Bereich Hotellerie"), "plausible_name rejects noun phrase")
+    ok(not _enrich.plausible_name("Schreiben Sie"), "plausible_name rejects German function words")
+
+    # --- generic mailbox detection + name-from-local
+    ok(_enrich._is_generic_local("info"), "info@ is generic")
+    ok(_enrich._is_generic_local("info-muc"), "info-muc@ is generic")
+    ok(_enrich._is_generic_local("news"), "news@ is generic")
+    ok(not _enrich._is_generic_local("max.huber"), "personal local is not generic")
+    ok(_enrich.name_from_local("max.huber") == "Max Huber", "name derived from local part")
+    ok(_enrich.name_from_local("m.huber") == "", "initials are not a name")
+    ok(_enrich.name_from_local("info") == "", "generic local yields no name")
+
+    # --- FreeRegexEnricher: no name for shared mailboxes, name only when anchored
+    free = _enrich.FreeRegexEnricher()
+    txt = (
+        "Schreiben Sie uns. Bereich Hotellerie. E-Mail: news@elaya-hotels.com . "
+        + ("Lorem ipsum dolor sit amet. " * 6)
+        + "Geschäftsführer Max Huber. E-Mail: max.huber@webbistro.at ."
+    )
+    fc = {c2["email"]: c2 for c2 in free.enrich({"name": "X"}, txt)["contacts"]}
+    ok(fc["news@elaya-hotels.com"]["name"] == "", "shared mailbox gets no name")
+    ok(fc["max.huber@webbistro.at"]["name"] == "Max Huber", "anchored/personal mailbox keeps name")
 
     # --- ClaudeEnricher mapping (mocked SDK client, no network/key)
     import enrich as enrich_mod

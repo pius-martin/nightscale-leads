@@ -68,7 +68,45 @@ _NAME_STOPWORDS = {
     "strasse", "platz", "montag", "dienstag", "mittwoch", "donnerstag", "freitag",
     "samstag", "sonntag", "januar", "februar", "märz", "maerz", "april", "mai", "juni",
     "juli", "august", "september", "oktober", "november", "dezember",
+    # German function words and common business/industry nouns that are capitalised
+    # in normal text and would otherwise pass as a "name".
+    "sie", "ihr", "ihre", "wir", "uns", "unser", "unsere", "schreiben", "bereich",
+    "abteilung", "hotellerie", "gastronomie", "service", "rezeption", "reservierung",
+    "küche", "kueche", "bar", "restaurant", "hotel", "cafe", "café", "speisekarte",
+    "angebot", "angebote", "aktuelles", "willkommen", "herzlich", "damen", "herren",
+    "sehr", "geehrte", "geehrter", "liebe", "lieber", "mehr", "hier", "jetzt", "gerne",
+    "danke", "anfahrt", "route", "karte", "öffnungszeiten", "oeffnungszeiten",
 }
+
+# Local-parts (or their leading segment) that belong to a shared mailbox, not a
+# person — so no name should ever be attached to them.
+_GENERIC_LOCAL_SET = {
+    "info", "office", "kontakt", "contact", "mail", "email", "hello", "hallo", "moin",
+    "welcome", "willkommen", "anfrage", "anfragen", "news", "newsletter", "presse",
+    "press", "marketing", "vertrieb", "sales", "verkauf", "team", "service", "support",
+    "reservierung", "reservation", "reservations", "reservierungen", "booking", "buchung",
+    "empfang", "rezeption", "post", "shop", "order", "bestellung", "job", "jobs",
+    "karriere", "career", "datenschutz", "webmaster", "admin", "noreply", "no-reply",
+    "kundenservice", "gastro", "restaurant", "hotel", "feedback", "service-center",
+}
+
+
+def _is_generic_local(local: str) -> bool:
+    """A shared mailbox (info@, mail@, news@, info-muc@ …) has no single owner."""
+    local = (local or "").lower()
+    if local in _GENERIC_LOCAL_SET:
+        return True
+    lead = re.split(r"[^a-zäöüß]", local, maxsplit=1)[0]
+    return lead in _GENERIC_LOCAL_SET
+
+
+def name_from_local(local: str) -> str:
+    """Derive a person name from a personalised mailbox like
+    'vorname.nachname@' or 'vorname_nachname@'. Initials (m.huber) are skipped."""
+    m = re.match(r"^([a-zäöüß]{2,})[._]([a-zäöüß]{2,})$", (local or "").lower())
+    if not m:
+        return ""
+    return clean_name(f"{m.group(1).capitalize()} {m.group(2).capitalize()}")
 
 
 def plausible_name(value: str) -> bool:
@@ -151,8 +189,19 @@ class FreeRegexEnricher:
             window = text[max(0, idx - 180):idx]
             local = email.split("@")[0].lower()
             role = _role_for(window)
-            names = _NAME_RE.findall(_TITLE_RE.sub(" ", window))
-            name = clean_name(" ".join(names[-1]) if names else "")
+            # Prefer no name over a wrong one. Shared mailboxes (info@, news@ …)
+            # belong to nobody, so never guess a name from surrounding text.
+            if _is_generic_local(local):
+                name = ""
+            else:
+                # A personalised mailbox can yield the name directly; otherwise
+                # only trust a name from the text when a title/role word anchors
+                # it (German capitalises all nouns, so an unanchored capitalised
+                # pair is almost never a real person).
+                name = name_from_local(local)
+                if not name and role != "allgemein":
+                    names = _NAME_RE.findall(_TITLE_RE.sub(" ", window))
+                    name = clean_name(" ".join(names[-1]) if names else "")
             result["contacts"].append({"name": name, "role": role, "email": email, "phone": ""})
         return result
 
@@ -238,8 +287,11 @@ class ClaudeEnricher:
             email = (cg("email") or "").strip()
             if not email:
                 continue
+            # Even the AI sometimes labels a shared mailbox with a company or
+            # generic name — drop the name for those.
+            cname = "" if _is_generic_local(email.split("@")[0]) else clean_name(cg("name") or "")
             contacts.append({
-                "name": clean_name(cg("name") or ""),
+                "name": cname,
                 "role": normalize_role(cg("role") or ""),
                 "email": email,
                 "phone": (cg("phone") or "").strip(),
